@@ -31,7 +31,7 @@
     'theme-saas': { display_name: 'التصميم الإبداعي', theme_js: './themes/theme-3.js' },
   };
 
-  const state = { themes: [], user: null, profile: null, isAdmin: false, userThemeButtonEnabled: false };
+  const state = { themes: [], user: null, profile: null, isAdmin: false, userThemeButtonEnabled: false, userThemeBottomButtonEnabled: false };
   const $ = (s, r = document) => r.querySelector(s);
   const esc = v => String(v ?? '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -206,75 +206,61 @@
     else { await setupUserThemeButton(); observeThemeButton(); }
   }
 
-  function addThemeButton() {
-    const host = document.querySelector('#app > header.header');
-    if (!host) return false;
-    const actions = host.querySelector('.header-actions');
-    if (!actions) return false;
-
-    // Put the button exactly where the user requested:
-    // - Admin: immediately beside the administration button.
-    // - Non-admin: immediately beside the platform owner button.
-    const adminBtn = actions.querySelector('.admin-panel-trigger');
-    const managerWrap = actions.querySelector('.manager-trigger-wrap');
-
-    let b = document.getElementById('midadThemeButton');
+  function createThemeButton(id, position) {
+    let b = document.getElementById(id);
     if (!b) {
       b = document.createElement('button');
-      b.id = 'midadThemeButton';
+      b.id = id;
       b.type = 'button';
       b.innerHTML = '<i class="fas fa-palette" aria-hidden="true"></i><span>سمات</span>';
       b.title = 'السمات';
       b.setAttribute('aria-label', 'السمات');
-      b.onclick = (e) => {
-        e.stopPropagation();
-        openThemePicker(state.isAdmin ? 'admin' : 'user');
-      };
-      b.onmouseenter = () => { b.style.transform = 'translateY(-1px)'; };
-      b.onmouseleave = () => { b.style.transform = ''; };
+      b.onclick = (e) => { e.stopPropagation(); openThemePicker(state.isAdmin ? 'admin' : 'user'); };
+      b.onmouseenter = () => { b.style.transform = position === 'bottom' ? 'translateX(-50%) translateY(-2px)' : 'translateY(-1px)'; };
+      b.onmouseleave = () => { b.style.transform = position === 'bottom' ? 'translateX(-50%)' : ''; };
     }
-
-    // Reset any old positioning injected by previous versions.
+    if (position === 'bottom') {
+      b.style.cssText = [
+        'position:fixed','left:50%','bottom:18px','transform:translateX(-50%)','z-index:99980',
+        'display:inline-flex','align-items:center','justify-content:center','gap:7px','min-width:96px','height:44px','padding:0 15px',
+        'border:1px solid var(--border,#e2e8f0)','background:var(--surface,#fff)','color:var(--primary,#0ea5e9)','border-radius:14px',
+        'font:800 13px Cairo,sans-serif','cursor:pointer','box-shadow:0 10px 28px rgba(15,23,42,.16)','transition:transform .18s,box-shadow .18s,border-color .18s',
+        'direction:rtl','white-space:nowrap'
+      ].join(';');
+      return b;
+    }
+    const host = document.querySelector('#app > header.header');
+    if (!host) return null;
+    const actions = host.querySelector('.header-actions');
+    if (!actions) return null;
     b.style.cssText = [
-      'position:relative',
-      'left:auto',
-      'top:auto',
-      'transform:none',
-      'z-index:100',
-      'display:inline-flex',
-      'align-items:center',
-      'justify-content:center',
-      'gap:7px',
-      'min-width:88px',
-      'height:40px',
-      'padding:0 13px',
-      'border:1px solid var(--border,#e2e8f0)',
-      'background:var(--surface,#fff)',
-      'color:var(--primary,#0ea5e9)',
-      'border-radius:12px',
-      'font:800 13px Cairo,sans-serif',
-      'cursor:pointer',
-      'box-shadow:0 4px 14px rgba(15,23,42,.08)',
-      'transition:transform .18s,box-shadow .18s,border-color .18s',
-      'direction:rtl',
-      'white-space:nowrap',
-      'flex:0 0 auto',
-      'margin:0'
+      'position:relative','left:auto','top:auto','transform:none','z-index:100','display:inline-flex','align-items:center','justify-content:center','gap:7px',
+      'min-width:88px','height:40px','padding:0 13px','border:1px solid var(--border,#e2e8f0)','background:var(--surface,#fff)',
+      'color:var(--primary,#0ea5e9)','border-radius:12px','font:800 13px Cairo,sans-serif','cursor:pointer','box-shadow:0 4px 14px rgba(15,23,42,.08)',
+      'transition:transform .18s,box-shadow .18s,border-color .18s','direction:rtl','white-space:nowrap','flex:0 0 auto','margin:0'
     ].join(';');
+    const adminBtn = actions.querySelector('.admin-panel-trigger');
+    const managerWrap = actions.querySelector('.manager-trigger-wrap');
+    if (state.isAdmin && adminBtn) adminBtn.insertAdjacentElement('afterend', b);
+    else if (!state.isAdmin && managerWrap) managerWrap.insertAdjacentElement('afterend', b);
+    else if (adminBtn) adminBtn.insertAdjacentElement('afterend', b);
+    else actions.appendChild(b);
+    return b;
+  }
 
-    // Admin: next to the admin control.
-    // User/member/moderator: next to the owner control.
-    if (state.isAdmin && adminBtn) {
-      adminBtn.insertAdjacentElement('afterend', b);
-    } else if (!state.isAdmin && managerWrap) {
-      managerWrap.insertAdjacentElement('afterend', b);
-    } else if (adminBtn) {
-      adminBtn.insertAdjacentElement('afterend', b);
-    } else {
-      actions.appendChild(b);
+  function addThemeButton() {
+    createThemeButton('midadThemeButton', 'top');
+  }
+
+  function addBottomThemeButton() {
+    if (state.isAdmin || !state.userThemeBottomButtonEnabled || window.__midadViewAsMember) {
+      const old = document.getElementById('midadThemeBottomButton');
+      if (old) old.remove();
+      return;
     }
-
-    return true;
+    if (!document.body) return;
+    const b = createThemeButton('midadThemeBottomButton', 'bottom');
+    if (b && !b.parentNode) document.body.appendChild(b);
   }
 
   function applyViewAsMemberMode() {
@@ -288,6 +274,8 @@
     if (manageBtn) manageBtn.style.setProperty('display', on ? 'none' : '', on ? 'important' : '');
     const themeBtn = document.getElementById('midadThemeButton');
     if (themeBtn) themeBtn.style.setProperty('display', on ? 'none' : '', on ? 'important' : '');
+    const bottomBtn = document.getElementById('midadThemeBottomButton');
+    if (bottomBtn) bottomBtn.style.setProperty('display', on ? 'none' : '', on ? 'important' : '');
   }
   window.__midadApplyViewMode = applyViewAsMemberMode;
 
@@ -300,7 +288,10 @@
         if (window.__midadThemeButtonRaf) cancelAnimationFrame(window.__midadThemeButtonRaf);
         window.__midadThemeButtonRaf = requestAnimationFrame(() => {
           if (state.isAdmin && !window.__midadViewAsMember) addThemeButton();
-          else if (state.userThemeButtonEnabled) addThemeButton();
+          else if (!state.isAdmin) {
+            if (state.userThemeButtonEnabled) addThemeButton();
+            addBottomThemeButton();
+          }
         });
       });
       obs.observe(app, {childList:true, subtree:true});
@@ -332,9 +323,11 @@
 
   async function setupUserThemeButton() {
     try {
-      const { data: p } = await client.from('user_theme_preferences').select('themes_button_enabled').eq('user_id', state.user.id).maybeSingle();
+      const { data: p } = await client.from('user_theme_preferences').select('themes_button_enabled,themes_bottom_button_enabled').eq('user_id', state.user.id).maybeSingle();
       state.userThemeButtonEnabled = !!p?.themes_button_enabled;
+      state.userThemeBottomButtonEnabled = !!p?.themes_bottom_button_enabled;
       if (state.userThemeButtonEnabled) addThemeButton();
+      if (state.userThemeBottomButtonEnabled) addBottomThemeButton();
     } catch (_) { state.userThemeButtonEnabled = false; }
   }
 
@@ -409,8 +402,9 @@
     box.className = 'midad-theme-overlay';
     box.innerHTML = `<div class="midad-theme-modal user-theme-modal"><div class="midad-theme-head"><div><b>سمات المستخدم</b><small>حدد شكل المنصة وصلاحيات زر السمات</small></div><button class="midad-x">×</button></div><div class="midad-theme-body">
       <label class="midad-label">1 — اختيار السمة</label><select id="mtUserTheme" class="midad-select"><option value="">استخدام السمة الافتراضية</option>${themes.map(t => `<option value="${esc(t.id)}" ${String(pref?.theme_id || '') === String(t.id) ? 'selected' : ''}>${esc(displayName(t))}</option>`).join('')}</select>
-      <div class="midad-switch-row"><div><b>2 — إتاحة زر السمات</b><small>يظهر للمستخدم زر السمات كاملًا.</small></div><label class="midad-switch"><input id="mtBtn" type="checkbox" ${pref?.themes_button_enabled ? 'checked' : ''}><span></span></label></div>
-      <div class="midad-switch-row"><div><b>3 — إتاحة زر السمات مع تحديد السمات</b><small>المستخدم يرى فقط السمات التي تختارها له.</small></div><label class="midad-switch"><input id="mtRestrict" type="checkbox" ${pref?.restricted_theme_selection ? 'checked' : ''}><span></span></label></div>
+      <div class="midad-switch-row"><div><b>2 — إتاحة الزر العلوي للسمات</b><small>يظهر زر السمات أعلى الشاشة بجانب أدوات الرأس.</small></div><label class="midad-switch"><input id="mtBtn" type="checkbox" ${pref?.themes_button_enabled ? 'checked' : ''}><span></span></label></div>
+      <div class="midad-switch-row"><div><b>3 — إتاحة الزر السفلي للسمات</b><small>يظهر زر سمات ثابت أسفل الشاشة.</small></div><label class="midad-switch"><input id="mtBottomBtn" type="checkbox" ${pref?.themes_bottom_button_enabled ? 'checked' : ''}><span></span></label></div>
+      <div class="midad-switch-row"><div><b>4 — إتاحة زر السمات مع تحديد السمات</b><small>المستخدم يرى فقط السمات التي تختارها له.</small></div><label class="midad-switch"><input id="mtRestrict" type="checkbox" ${pref?.restricted_theme_selection ? 'checked' : ''}><span></span></label></div>
       <div id="mtAllowed" class="midad-allowed">${themes.map(t => `<label><input type="checkbox" value="${esc(t.id)}" ${pref?.allowed?.includes(String(t.id)) ? 'checked' : ''}> <span>${esc(displayName(t))}</span></label>`).join('')}</div>
       <button id="mtSave" class="midad-primary">حفظ إعدادات المستخدم</button></div></div>`;
     document.body.appendChild(box); addOverlayHandlers(box, () => box.remove());
@@ -423,7 +417,8 @@
       const rest = restrict.checked;
       const checks = [...allowed.querySelectorAll('input:checked')].map(i => i.value);
       try {
-        await saveUserPrefs(uid, { theme_id: themeId, themes_button_enabled: button, restricted_theme_selection: rest }, checks);
+        const bottomButton = $('#mtBottomBtn', box).checked;
+        await saveUserPrefs(uid, { theme_id: themeId, themes_button_enabled: button, themes_bottom_button_enabled: bottomButton, restricted_theme_selection: rest }, checks);
         box.remove(); toast('تم حفظ إعدادات السمات للمستخدم');
       } catch (e) { toast('تعذر حفظ إعدادات السمات', false); }
     };
@@ -655,6 +650,13 @@
       @keyframes midadFade{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:scale(1)}}
       @media(max-width:900px){#midadThemeButton{padding:8px 12px}.midad-theme-grid{grid-template-columns:repeat(2,1fr)}.midad-theme-row{grid-template-columns:30px 100px minmax(0,1fr) auto}.midad-row-preview{width:100px}.midad-row-preview .midad-preview-art{height:54px}}
       @media(max-width:650px){#midadThemeButton{font-size:12px;padding:7px 11px}.midad-theme-grid{grid-template-columns:1fr}.midad-theme-modal{padding:16px;border-radius:20px}.midad-theme-row{grid-template-columns:28px 1fr}.midad-row-preview{display:none}.midad-row-actions{grid-column:2}.midad-theme-head b{font-size:19px}.midad-manager-default{display:block}.midad-manager-default label{display:block;margin-bottom:7px}.midad-allowed{grid-template-columns:1fr}}
+      .midad-manager-public-panels{display:grid;grid-template-columns:minmax(180px,.55fr) minmax(0,1.45fr);gap:14px;margin-top:18px;align-items:stretch}
+      .midad-manager-version-card,.midad-manager-news-card{border:1px solid var(--border,#e2e8f0);background:linear-gradient(145deg,var(--surface,#fff),var(--surface-alt,#f8fafc));border-radius:20px;padding:16px;box-shadow:0 10px 30px rgba(15,23,42,.06)}
+      .midad-manager-version-card{display:flex;align-items:center;gap:12px;min-height:120px}.midad-manager-panel-icon{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;background:var(--primary-bg,#eff6ff);color:var(--primary,#2563eb);font-size:18px;flex:none}.midad-manager-version-card small{display:block;color:var(--text-muted,#64748b);font:700 11px Cairo,sans-serif;margin-bottom:2px}.midad-manager-version-card strong{display:block;font:900 clamp(24px,4vw,34px) 'Outfit',Cairo,sans-serif;letter-spacing:.2px;color:var(--text,#111827);direction:ltr;text-align:left}
+      .midad-manager-panel-title{display:flex;align-items:center;gap:8px;color:var(--text,#111827);margin-bottom:10px}.midad-manager-panel-title i{color:var(--primary,#2563eb)}.midad-manager-panel-title b{font:900 16px Cairo,sans-serif}.midad-manager-news-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.midad-manager-news-item{padding:12px 13px;border-radius:15px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff)}.midad-manager-news-item b{display:block;font:900 13px Cairo,sans-serif;color:var(--text,#111827)}.midad-manager-news-item p{margin:5px 0 0;white-space:pre-wrap;line-height:1.75;font:600 11px Cairo,sans-serif;color:var(--text-secondary,#64748b)}.midad-manager-news-empty{padding:18px;border:1px dashed var(--border,#cbd5e1);border-radius:14px;text-align:center;color:var(--text-muted,#64748b);font:700 11px Cairo,sans-serif}
+      .midad-manager-public-editor{display:grid;grid-template-columns:minmax(160px,.35fr) minmax(0,1.65fr);gap:14px;margin-top:14px}.midad-news-editor{border:1px solid var(--border,#e2e8f0);border-radius:16px;padding:13px;background:var(--surface-alt,#f8fafc)}.midad-news-editor-list{display:grid;gap:9px}.midad-news-editor-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:9px;align-items:start;padding:10px;border:1px solid var(--border,#e2e8f0);border-radius:14px;background:var(--surface,#fff)}.midad-news-editor-order{display:flex;flex-direction:column;align-items:center;gap:4px}.midad-news-editor-order span{font:900 11px Cairo,sans-serif;color:var(--text-muted,#64748b)}.midad-news-editor-order button,.midad-news-delete{width:28px;height:28px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);color:var(--text-secondary,#64748b);border-radius:9px;cursor:pointer}.midad-news-editor-order button:disabled{opacity:.35;cursor:not-allowed}.midad-news-delete{color:#b91c1c;border-color:#fecaca}.midad-news-editor-fields{display:grid;gap:7px}.midad-news-editor-fields input,.midad-news-editor-fields textarea{width:100%;border:1px solid var(--border,#dbe5ef);background:var(--surface,#fff);color:var(--text,#111827);border-radius:11px;padding:9px 10px;font:700 12px Cairo,sans-serif;outline:none}.midad-news-editor-fields textarea{min-height:78px;resize:vertical;line-height:1.7}.midad-news-add-btn{margin-top:10px;width:100%}.midad-news-editor-empty{padding:12px;text-align:center;color:var(--text-muted,#64748b);font:700 11px Cairo,sans-serif;border:1px dashed var(--border,#cbd5e1);border-radius:12px}
+      @media(max-width:720px){.midad-manager-public-panels,.midad-manager-public-editor{grid-template-columns:1fr}.midad-manager-news-list{grid-template-columns:1fr}.midad-news-editor-row{grid-template-columns:auto minmax(0,1fr) auto}}
+
     `;
     document.head.appendChild(s);
   }

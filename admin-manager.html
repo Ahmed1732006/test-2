@@ -705,17 +705,18 @@ async function openThemes(id){
   const pref=pr.data||{},allowed=(ar.data||[]).map(x=>String(x.theme_id));
   $('modalRoot').innerHTML=`<div class="modal-back"><div class="modal"><div class="modal-head"><h2>${ic('palette')}سمات ${esc(nameOf(u))}</h2><button class="close" onclick="closeModal()">×</button></div>
   <div class="field"><label>السمة الأساسية التي يفتح عليها</label><select id="themeMain"><option value="">السمة الافتراضية</option>${themes.map(t=>`<option value="${esc(t.id)}" ${String(pref.theme_id||'')===String(t.id)?'selected':''}>${esc(t.display_name||t.name||THEME_FALLBACK[t.id]||t.id)}</option>`).join('')}</select></div>
-  <div class="field"><label>إتاحة زر السمات للمستخدم</label><select id="themeButton"><option value="false" ${!pref.themes_button_enabled?'selected':''}>لا</option><option value="true" ${pref.themes_button_enabled?'selected':''}>نعم</option></select></div>
+  <div class="field"><label>إتاحة الزر العلوي للسمات</label><select id="themeButton"><option value="false" ${!pref.themes_button_enabled?'selected':''}>لا</option><option value="true" ${pref.themes_button_enabled?'selected':''}>نعم</option></select></div>
+  <div class="field"><label>إتاحة الزر السفلي للسمات</label><select id="themeBottomButton"><option value="false" ${!pref.themes_bottom_button_enabled?'selected':''}>لا</option><option value="true" ${pref.themes_bottom_button_enabled?'selected':''}>نعم</option></select></div>
   <div class="field"><label>تحديد السمات المسموح بها</label><select id="themeRestrict"><option value="false" ${!pref.restricted_theme_selection?'selected':''}>لا — كل السمات</option><option value="true" ${pref.restricted_theme_selection?'selected':''}>نعم — المسموح بها فقط</option></select></div>
   <div class="field"><label>اختار السمات المسموح بها</label><div class="theme-grid">${themes.map(t=>`<label><input type="checkbox" value="${esc(t.id)}" ${allowed.includes(String(t.id))?'checked':''}>${esc(t.display_name||t.name||THEME_FALLBACK[t.id]||t.id)}</label>`).join('')}</div></div>
   <div class="actions"><button onclick="saveThemes('${esc(id)}')">${ic('check')}حفظ إعدادات السمات</button><button class="btn-gray" onclick="closeModal()">إلغاء</button></div><div id="themeStatus" class="status"></div></div></div>`;
  }catch(e){$('modalRoot').innerHTML=`<div class="modal-back"><div class="modal"><h2>${ic('palette')}السمات</h2><div class="status err">تعذر تحميل السمات: ${esc(e.message||'خطأ')}</div><button onclick="closeModal()">إغلاق</button></div></div>`;}
 }
 async function saveThemes(id){
- const themeId=$('themeMain').value||null,button=$('themeButton').value==='true',restrict=$('themeRestrict').value==='true',allowed=[...document.querySelectorAll('.theme-grid input:checked')].map(x=>x.value);
+ const themeId=$('themeMain').value||null,button=$('themeButton').value==='true',bottomButton=$('themeBottomButton').value==='true',restrict=$('themeRestrict').value==='true',allowed=[...document.querySelectorAll('.theme-grid input:checked')].map(x=>x.value);
  try{
   const old=await sb.from('user_theme_preferences').select('id').eq('user_id',id).maybeSingle();if(old.error)throw old.error;
-  const payload={user_id:id,theme_id:themeId,themes_button_enabled:button,restricted_theme_selection:restrict};
+  const payload={user_id:id,theme_id:themeId,themes_button_enabled:button,themes_bottom_button_enabled:bottomButton,restricted_theme_selection:restrict};
   let r=old.data?await sb.from('user_theme_preferences').update(payload).eq('id',old.data.id):await sb.from('user_theme_preferences').insert(payload);if(r.error)throw r.error;
   const del=await sb.from('user_allowed_themes').delete().eq('user_id',id);if(del.error)throw del.error;
   if(restrict&&allowed.length){const ins=await sb.from('user_allowed_themes').insert(allowed.map(x=>({user_id:id,theme_id:x})));if(ins.error)throw ins.error;}

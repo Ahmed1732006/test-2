@@ -132,7 +132,7 @@
             userRequests: [],
             adminMessages: [],
             pendingUserMessages: [],
-            platformManager: {id:1,name:'مدير المنصة',titles:[],message:'أهلًا بيكم في المنصة ✨',avatar:null},
+            platformManager: {id:1,name:'مدير المنصة',titles:[],message:'أهلًا بيكم في المنصة ✨',avatar:null,version:'3',news_items:[]},
                 welcomeVideoCampaign: null,
                 welcomeVideoLibrary: [],
                 welcomeVideoShown: false,
@@ -820,6 +820,34 @@
         // ─── Full Profile Page ───
 
         // ─── Platform Manager page ───
+
+        function renderManagerNewsEditor(items){
+            const list=Array.isArray(items)?items:[];
+            if(!list.length) return '<div class="midad-news-editor-empty">مفيش مربعات مضافة. اضغط «إنشاء مربع جديد».</div>';
+            return list.map((n,i)=>`<div class="midad-news-editor-row" data-news-index="${i}">
+                <div class="midad-news-editor-order"><button type="button" data-act="manager-news-up" data-news-index="${i}" ${i===0?'disabled':''}>↑</button><span>${i+1}</span><button type="button" data-act="manager-news-down" data-news-index="${i}" ${i===list.length-1?'disabled':''}>↓</button></div>
+                <div class="midad-news-editor-fields"><input data-news-title type="text" maxlength="120" value="${escapeHtml(n.title||'')}" placeholder="عنوان المربع"><textarea data-news-body maxlength="1000" placeholder="اكتب محتوى المربع...">${escapeHtml(n.body||'')}</textarea></div>
+                <button type="button" class="midad-news-delete" data-act="manager-news-delete" data-news-index="${i}" title="حذف"><i class="fas fa-trash"></i></button>
+              </div>`).join('');
+        }
+        function readManagerNewsEditor(){
+            return [...document.querySelectorAll('#manager-news-list-editor .midad-news-editor-row')].map(row=>({title:(row.querySelector('[data-news-title]')?.value||'').trim(),body:(row.querySelector('[data-news-body]')?.value||'').trim()})).filter(x=>x.title||x.body).slice(0,30);
+        }
+
+        function syncManagerPageDraft(){
+            const pm=state.platformManager||{};
+            const name=document.getElementById('manager-page-name');
+            const message=document.getElementById('manager-page-message');
+            const version=document.getElementById('manager-page-version');
+            state.platformManager={...pm,
+                name:name?.value?.trim()||pm.name||'مدير المنصة',
+                message:(message?.value?.trim() ?? pm.message ?? ''),
+                version:version?.value?.trim()||pm.version||'3',
+                news_items:readManagerNewsEditor()
+            };
+            return state.platformManager;
+        }
+
         function renderManagerPage() {
             const pm = state.platformManager || {};
             const titles = Array.isArray(pm.titles) ? pm.titles : [];
@@ -850,6 +878,16 @@
                     <div class="manager-page-message">${escapeHtml(pm.message || 'أهلًا بيكم في المنصة ✨')}</div><div style="margin-top:12px">${renderPlatformButtons('manager')}</div>
                   </div>
                 </div>
+                <div class="midad-manager-public-panels">
+                  <div class="midad-manager-version-card">
+                    <span class="midad-manager-panel-icon"><i class="fas fa-code-branch"></i></span>
+                    <div><small>إصدار المنصة</small><strong>Version ${escapeHtml(pm.version || '3')}</strong></div>
+                  </div>
+                  <div class="midad-manager-news-card">
+                    <div class="midad-manager-panel-title"><i class="fas fa-wand-magic-sparkles"></i><b>ما الجديد 🙂</b></div>
+                    <div class="midad-manager-news-list">${(Array.isArray(pm.news_items)?pm.news_items:[]).length ? pm.news_items.map((n,i)=>`<article class="midad-manager-news-item"><b>${escapeHtml(n.title||'تحديث')}</b><p>${escapeHtml(n.body||'')}</p></article>`).join('') : '<div class="midad-manager-news-empty">مفيش تحديثات جديدة حاليًا ✨</div>'}</div>
+                  </div>
+                </div>
 
                 ${owner ? `
                 <div class="manager-page-editor">
@@ -875,6 +913,14 @@
                     </div>
                     <div class="manager-page-title-tools">
                       ${PROFILE_TITLE_PRESETS.map(t => `<button type="button" class="${selected.includes(t)?'active':''}" data-act="manager-page-title-add" data-manager-title="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}
+                    </div>
+                  </div>
+                  <div class="midad-manager-public-editor">
+                    <div class="field"><label>Version</label><input id="manager-page-version" type="text" value="${escapeHtml(pm.version || '3')}" maxlength="20" placeholder="3"></div>
+                    <div class="midad-news-editor">
+                      <div class="manager-page-editor-title"><i class="fas fa-bullhorn"></i> ما الجديد 🙂</div>
+                      <div id="manager-news-list-editor" class="midad-news-editor-list">${renderManagerNewsEditor(pm.news_items||[])}</div>
+                      <button type="button" class="btn-save midad-news-add-btn" data-act="manager-news-add"><i class="fas fa-plus"></i> إنشاء مربع جديد</button>
                     </div>
                   </div>
                   <div class="manager-page-actions">
@@ -915,7 +961,7 @@
                     <div class="profile-info-row"><div class="profile-info-label">رقم الهاتف</div><div class="profile-info-value">${u.phone || 'غير محدد'}</div></div>
                     <div class="profile-info-row"><div class="profile-info-label">نوع الحساب</div><div class="profile-info-value">${isAdmin() ? 'Admin' : 'Member'}</div></div>
                   </div>
-                  <div class="profile-card" style="margin-top:16px" id="midad-pdf-prep-card">
+                  ${isAdmin() ? `<div class="profile-card" style="margin-top:16px" id="midad-pdf-prep-card">
                     <h3 style="margin:0 0 4px">📄 حالة تجهيز ملفات PDF</h3>
                     <p class="access-help" style="margin:0 0 10px">Supabase بيجهز النسخ الخاصة بحسابك تلقائيًا. لما الملف يبقى جاهز، التحميل يتم من النسخة الجاهزة مباشرة.</p>
                     <div id="midad-pdf-prep-summary" style="font-weight:700">جاري التحقق من حالة التجهيز…</div>
@@ -923,7 +969,7 @@
                       <div id="midad-pdf-prep-bar" style="height:100%;width:0%;border-radius:999px;background:currentColor;transition:width .35s ease"></div>
                     </div>
                     <div id="midad-pdf-prep-detail" style="margin-top:7px;font-size:.88em;opacity:.78"></div>
-                  </div>
+                  </div>` : ''}
                   <div class="profile-actions">
                     <button class="profile-page-btn primary" data-act="edit-profile"><i class="fas fa-user-edit"></i> تعديل الملف الشخصي</button>
                     <button class="profile-page-btn" data-act="change-pass"><i class="fas fa-key"></i> تغيير كلمة السر</button>
@@ -2522,6 +2568,24 @@
                     render();
                     break;
                 }
+                case 'manager-news-add': {
+                    if(!isOwnerAdmin()) return showToast('غير مصرح به.','error');
+                    syncManagerPageDraft(); const items=[...(state.platformManager.news_items||[]),{title:'',body:''}];
+                    state.platformManager={...state.platformManager,news_items:items}; render();
+                    break;
+                }
+                case 'manager-news-up':
+                case 'manager-news-down': {
+                    if(!isOwnerAdmin()) return showToast('غير مصرح به.','error');
+                    syncManagerPageDraft(); const idx=Number(el.getAttribute('data-news-index')); const items=[...(state.platformManager.news_items||[])]; const delta=act==='manager-news-up'?-1:1; const j=idx+delta;
+                    if(Number.isInteger(idx)&&j>=0&&j<items.length){[items[idx],items[j]]=[items[j],items[idx]]; state.platformManager={...state.platformManager,news_items:items}; render();}
+                    break;
+                }
+                case 'manager-news-delete': {
+                    if(!isOwnerAdmin()) return showToast('غير مصرح به.','error');
+                    syncManagerPageDraft(); const idx=Number(el.getAttribute('data-news-index')); const items=[...(state.platformManager.news_items||[])]; if(idx>=0&&idx<items.length){items.splice(idx,1); state.platformManager={...state.platformManager,news_items:items}; render();}
+                    break;
+                }
                 case 'save-platform-manager-page': {
                     if(!isOwnerAdmin()) return showToast('غير مصرح به لتعديل مدير المنصة.','error');
                     const btn=el; btn.disabled=true; btn.textContent='جاري الحفظ…';
@@ -2529,6 +2593,8 @@
                         const current=state.platformManager||{};
                         const name=(document.getElementById('manager-page-name')?.value||'مدير المنصة').trim()||'مدير المنصة';
                         const message=(document.getElementById('manager-page-message')?.value||'').trim();
+                        const version=(document.getElementById('manager-page-version')?.value||'3').trim()||'3';
+                        const news_items=readManagerNewsEditor();
                         let avatarPath=current.avatar_path||null;
                         const user=await getCurrentAuthUser();
                         if(!user) throw new Error('انتهت جلسة الدخول.');
@@ -2541,6 +2607,8 @@
                             public_titles:Array.isArray(current.titles)?current.titles:[],
                             public_message:message,
                             avatar_path:avatarPath,
+                            public_version:version,
+                            news_items,
                             updated_at:new Date().toISOString(),
                             updated_by:user.id
                         };
@@ -2552,7 +2620,9 @@
                             titles:Array.isArray(data.public_titles)?data.public_titles:[],
                             message:data.public_message||'',
                             avatar:publicStorageUrl('avatars',data.avatar_path||''),
-                            avatar_path:data.avatar_path||null
+                            avatar_path:data.avatar_path||null,
+                            version:data.public_version||'3',
+                            news_items:Array.isArray(data.news_items)?data.news_items:[]
                         };
                         state.managerPageAvatarFile=null;
                         render();
@@ -2576,7 +2646,7 @@
                         const payload={id:1,public_name:name,public_titles:Array.isArray(current.titles)?current.titles:[],public_message:message,avatar_path:avatarPath,updated_at:new Date().toISOString(),updated_by:(await getCurrentAuthUser()).id};
                         const {data,error}=await sb.from('platform_profile').upsert(payload,{onConflict:'id'}).select('*').single();
                         if(error) throw error;
-                        state.platformManager={id:data.id,name:data.public_name||name,titles:Array.isArray(data.public_titles)?data.public_titles:[],message:data.public_message||'',avatar:publicStorageUrl('avatars',data.avatar_path||'') ,avatar_path:data.avatar_path||null};
+                        state.platformManager={id:data.id,name:data.public_name||name,titles:Array.isArray(data.public_titles)?data.public_titles:[],message:data.public_message||'',avatar:publicStorageUrl('avatars',data.avatar_path||'') ,avatar_path:data.avatar_path||null,version:data.public_version||'3',news_items:Array.isArray(data.news_items)?data.news_items:[]};
                         closeModal(); render(); showToast('تم حفظ بيانات مدير المنصة وظهورها للجميع.','success');
                     }catch(err){ showToast(err.message||'تعذر حفظ بيانات مدير المنصة.','error'); }
                     finally{btn.disabled=false;btn.textContent='حفظ للجميع';}
@@ -3670,7 +3740,7 @@ async function listWelcomeVideoObjects(path=''){
             try{
                 const {data,error}=await sb.from('platform_profile').select('*').eq('id',1).maybeSingle();
                 if(error) throw error;
-                if(data){ state.platformManager={id:data.id,name:data.public_name||'مدير المنصة',titles:Array.isArray(data.public_titles)?data.public_titles:[],message:data.public_message||'',avatar:publicStorageUrl('avatars',data.avatar_path||''),avatar_path:data.avatar_path||null}; }
+                if(data){ state.platformManager={id:data.id,name:data.public_name||'مدير المنصة',titles:Array.isArray(data.public_titles)?data.public_titles:[],message:data.public_message||'',avatar:publicStorageUrl('avatars',data.avatar_path||''),avatar_path:data.avatar_path||null,version:data.public_version||'3',news_items:Array.isArray(data.news_items)?data.news_items:[]}; }
             }catch(_){ /* لا تمنع فتح المنصة إذا لم يكن سجل المدير موجودًا بعد */ }
         }
 
