@@ -248,65 +248,104 @@
     return new Blob([output],{type:'application/pdf'});
   }
 
-  async function midadKickPdfPreparation(action, payload={}) {
-    try {
-      if (!sb?.functions?.invoke) return null;
-      return await sb.functions.invoke('prepare-pdfs', { body: { action, ...payload } });
-    } catch (e) {
-      console.warn('PDF preparation worker unavailable', e);
-      return null;
-    }
-  }
-  window.midadRequestMaterialPreparation = (materialId) =>
-    midadKickPdfPreparation('prepare_material', { material_id: Number(materialId) });
-  window.midadRequestUserPreparation = (userId) =>
-    midadKickPdfPreparation('prepare_user', { user_id: userId });
-  window.midadProcessPdfQueue = () => midadKickPdfPreparation('process_queue');
+  const IV_PREP_POLL_MS = 2000;
+  const IV_PREP_MAX_WAIT_MS = 30 * 60 * 1000;
+  const ivPrepWaiters = new Map();
 
-  // Pre-generated PDF path: Supabase prepares one fingerprinted copy per member
-  // in the background. The browser only downloads that ready copy.
-  async function ivGetPreparedPdf(materialId) {
-    if (!materialId) return null;
-    try {
-      const r = await sb.rpc('midad_get_my_pdf_prepared', { p_material_id: Number(materialId) });
-      if (r.error) return null; // old installations keep the legacy path
-      return Array.isArray(r.data) ? (r.data[0] || null) : (r.data || null);
-    } catch (_) { return null; }
-  }
-  async function ivWaitPreparedPdf(materialId, name) {
-    if (!materialId) return null;
-    let last = -1;
-    for (let i=0;i<90;i++) {
-      const row = await ivGetPreparedPdf(materialId);
-      if (row?.status === 'ready' && row.prepared_path) return row;
-      if (row?.status === 'error') {
-        // Do not break existing downloads if background preparation failed.
-        return null;
-      }
-      const p = Math.max(0, Math.min(99, Number(row?.progress || 0)));
-      if (p !== last) {
-        last = p;
-        showToast(`جاري تجهيز ${name || 'الملف'}… ${p}%`, 'info');
-      }
-      await new Promise(r=>setTimeout(r, 2000));
+  function ivUpdatePrepStatus(message, type='info') {
+    try { showToast(message, type); } catch (_) {}
+    let el = document.getElementById('midad-pdf-prep-download-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'midad-pdf-prep-download-status';
+      el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:99999;min-width:min(360px,calc(100vw - 32px));max-width:calc(100vw - 32px);padding:12px 14px;border-radius:14px;background:rgba(20,20,24,.94);color:#fff;box-shadow:0 10px 35px rgba(0,0,0,.28);font:600 14px/1.45 system-ui,sans-serif;text-align:center;direction:rtl;backdrop-filter:blur(10px);';
+      document.body.appendChild(el);
     }
-    return null;
+    el.textContent = String(message || '');
+    el.dataset.type = type;
+    el.style.display = 'block';
+    clearTimeout(el._hideTimer);
+    if (type === 'success' || type === 'error') {
+      el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 3500);
+    }
   }
-  async function ivDownloadPrepared(row, name) {
+
+  async function ivGetPreparedRow(materialId, userId) {
+    if (!materialId || !userId) return null;
+    const { data, error } = await sb.from('iv_pdf_prepared_files')
+      .select('id,status,progress,prepared_path,file_name,fingerprint,source_path,updated_at')
+      .eq('material_id', Number(materialId))
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    return data || null;
+  }
+
+  async function ivWaitForPreparedPdf(materialId, userId, sourcePath) {
+    const key = `${userId}:${Number(materialId)}`;
+    if (ivPrepWaiters.has(key)) return ivPrepWaiters.get(key);
+
+    const promise = (async () => {
+      const started = Date.now();
+      let lastProgress = -1;
+      while (Date.now() - started < IV_PREP_MAX_WAIT_MS) {
+        const row = await ivGetPreparedRow(materialId, userId);
+        const progress = Math.max(0, Math.min(100, Number(row?.progress || 0)));
+        const status = String(row?.status || 'pending');
+
+        if (status === 'ready' && progress >= 100 && row?.prepared_path && (!row.source_path || row.source_path === sourcePath)) {
+          ivUpdatePrepStatus('الملف جاهز — جارٍ بدء التحميل…', 'success');
+          return row;
+        }
+
+        if (status === 'error') {
+          throw new Error(row?.error_message || 'تعذر تجهيز نسخة PDF الجاهزة.');
+        }
+
+        if (progress !== lastProgress) {
+          lastProgress = progress;
+          ivUpdatePrepStatus(`جاري تجهيز الملف… ${progress}%`, 'info');
+        }
+        await new Promise(resolve => setTimeout(resolve, IV_PREP_POLL_MS));
+      }
+      throw new Error('تجهيز الملف استغرق وقتًا أطول من المتوقع. جرّب التحميل مرة أخرى بعد قليل.');
+    })();
+
+    ivPrepWaiters.set(key, promise);
+    try { return await promise; } finally { ivPrepWaiters.delete(key); }
+  }
+
+  async function ivDownloadPreparedMaterial(materialId, sourcePath, name, user) {
+    let row = await ivGetPreparedRow(materialId, user.id);
+    const sameSource = row && (!row.source_path || row.source_path === sourcePath);
+    if (!(sameSource && row.status === 'ready' && Number(row.progress) >= 100 && row.prepared_path)) {
+      ivUpdatePrepStatus(`جاري تجهيز الملف… ${Math.max(0, Math.min(100, Number(row?.progress || 0)))}%`, 'info');
+      row = await ivWaitForPreparedPdf(materialId, user.id, sourcePath);
+    }
+
     const { data: blob, error } = await sb.storage.from('prepared-pdfs').download(row.prepared_path);
     if (error) throw error;
-    try {
-      await sb.rpc('midad_mark_prepared_pdf_download', { p_prepared_id: row.id });
-    } catch (_) {}
+
+    // The prepared copy already contains its forensic marker. Do NOT run
+    // pdf-lib again in the browser; that was the old slow path.
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = safeDownloadName(name || row.file_name || 'file.pdf');
+    a.download = safeDownloadName(name || row.file_name || deriveOriginalFileName(sourcePath) || 'file.pdf');
     a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    // Best-effort notification only. The forensic copy was already registered
+    // during preparation, so a failure here must never block the download.
+    try {
+      if (row.fingerprint) {
+        await sb.rpc('midad_mark_prepared_pdf_download', { p_prepared_id: row.id });
+      }
+    } catch (e) { console.warn('prepared PDF download mark', e); }
+    ivUpdatePrepStatus('تم بدء تحميل النسخة الجاهزة بالبصمة.', 'success');
   }
 
   async function downloadStorageBlob(bucket, path, name, meta={}) {
@@ -314,27 +353,17 @@
     const cleanPath = extractStoragePath(path, bucket) || path;
     if (!cleanPath || /^https?:\/\//i.test(cleanPath)) throw new Error('مسار الملف غير صالح للتنزيل الآمن.');
 
-    // Materials PDFs use a server-prepared copy. This is deliberately before
-    // downloading the original so the slow pdf-lib work never runs on a member device.
-    const isPdf = /\.pdf$/i.test(name || cleanPath);
-    if (bucket === 'materials' && isPdf && meta.materialId) {
-      let prepared = await ivGetPreparedPdf(meta.materialId);
-      if (!prepared || prepared.status !== 'ready') {
-        prepared = await ivWaitPreparedPdf(meta.materialId, name);
-      }
-      if (prepared?.status === 'ready' && prepared.prepared_path) {
-        await ivDownloadPrepared(prepared, name);
-        showToast('تم تحميل النسخة الجاهزة بالبصمة.', 'success');
-        return;
-      }
-      // Safe compatibility fallback: if the background worker is unavailable
-      // or reports an error, preserve the old working download path.
+    // Material PDFs use the pre-generated server-side copy. Other downloads
+    // keep the original behavior, so member-upload ZIPs and non-PDF assets are
+    // untouched.
+    if (bucket === 'materials' && meta.materialId && /\.pdf$/i.test(name || cleanPath)) {
+      return ivDownloadPreparedMaterial(Number(meta.materialId), cleanPath, name, user);
     }
 
     const { data: blob, error } = await sb.storage.from(bucket).download(cleanPath);
     if (error) throw error;
     let output = blob;
-    if (isPdf && window.PDFLib) {
+    if ((blob.type === 'application/pdf' || /\.pdf$/i.test(name || cleanPath)) && window.PDFLib) {
       output = await ivFingerprintPdf(blob, {materialId:meta.materialId ?? null, name:name || deriveOriginalFileName(cleanPath), path:cleanPath, userId:user.id});
     }
     const url = URL.createObjectURL(output);
@@ -347,7 +376,6 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
-
 
   const originalUploadFile = uploadFile;
   uploadFile = async function(bucket, file, folder='uploads') {
@@ -1697,21 +1725,6 @@
 .midad-file-name i{flex:none;opacity:.75;}
 .midad-file-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-.midad-pdf-prep-status{margin:14px 0;padding:14px;border:1px solid var(--border,#e2e8f0);border-radius:16px;background:var(--surface-alt,#f8fafc);box-shadow:var(--shadow-sm,0 2px 10px #0000000b);direction:rtl}
-.midad-pdf-prep-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.midad-pdf-prep-head>div{display:flex;align-items:center;gap:10px;min-width:0}
-.midad-pdf-prep-head>div>i{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:var(--primary-bg,#eff6ff);color:var(--primary,#2563eb)}
-.midad-pdf-prep-head strong{display:block;font-size:.8rem;color:var(--text,#111827)}
-.midad-pdf-prep-head small{display:block;margin-top:3px;color:var(--text-muted,#64748b);font-size:.65rem;line-height:1.5}
-.midad-pdf-prep-head>b{font-size:1rem;color:var(--primary,#2563eb)}
-.midad-pdf-prep-head>b.ready{color:var(--success,#047857)}
-.midad-pdf-prep-progress{height:8px;margin-top:11px;border-radius:99px;overflow:hidden;background:var(--border-light,#e2e8f0)}
-.midad-pdf-prep-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--primary,#2563eb),var(--purple,#7c3aed));transition:width .35s}
-.midad-pdf-prep-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px;color:var(--text-muted,#64748b);font-size:.65rem}
-.midad-pdf-prep-meta span{padding:4px 7px;border-radius:999px;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0)}
-.midad-pdf-prep-meta .ok{color:var(--success,#047857)}
-.midad-pdf-prep-meta .warn{color:#b45309}
-.midad-pdf-prep-note{display:block;margin-top:8px;color:var(--text-muted,#64748b);font-size:.63rem;line-height:1.6}
 /* Upload picker: real transparent file input ensures chooser works on desktop/mobile. */
 .midad-dropzone{position:relative;overflow:hidden;}
 .midad-dropzone input[type=file]{display:block!important;position:absolute!important;inset:0!important;width:100%!important;height:100%!important;opacity:0!important;cursor:pointer!important;z-index:5!important;}
@@ -1957,11 +1970,44 @@
       }
     };
 
+    // ─── Pre-generated PDF status ────────────────────────────────────────
+    let _pdfPrepStatusTimer = null;
+    async function refreshPdfPrepStatus() {
+      const card = document.getElementById('midad-pdf-prep-card');
+      if (!card || !state.user?.id) return;
+      try {
+        const { data, error } = await sb.from('iv_pdf_prepared_files')
+          .select('status,progress')
+          .eq('user_id', state.user.id);
+        if (error) throw error;
+        const rows = Array.isArray(data) ? data : [];
+        const total = rows.length;
+        const ready = rows.filter(r => String(r.status) === 'ready' && Number(r.progress || 0) >= 100).length;
+        const active = rows.filter(r => ['pending','processing'].includes(String(r.status))).length;
+        const failed = rows.filter(r => String(r.status) === 'error').length;
+        const pct = total ? Math.round(rows.reduce((sum,r)=>sum + Math.max(0,Math.min(100,Number(r.progress||0))),0) / total) : 0;
+        const summary = document.getElementById('midad-pdf-prep-summary');
+        const bar = document.getElementById('midad-pdf-prep-bar');
+        const detail = document.getElementById('midad-pdf-prep-detail');
+        if (summary) summary.textContent = total ? `${ready} من ${total} ملف جاهز — ${pct}%` : 'لا توجد ملفات PDF تحتاج تجهيزًا حاليًا.';
+        if (bar) bar.style.width = `${pct}%`;
+        if (detail) detail.textContent = `${active} قيد التجهيز${failed ? ` • ${failed} تعذر تجهيزها` : ''}`;
+      } catch (e) {
+        console.warn('pdf preparation status', e);
+      }
+    }
+    if (!_pdfPrepStatusTimer) {
+      _pdfPrepStatusTimer = setInterval(() => {
+        if (state.user?.id) void refreshPdfPrepStatus();
+      }, 10000);
+    }
+
     // Preserve the chosen user/video across every render.
     const _origRender = render;
     render = function (...args) {
       const out = _origRender.apply(this, args);
       try { _wvApplyDraftToUI(); } catch (_) {}
+      try { void refreshPdfPrepStatus(); } catch (_) {}
       return out;
     };
 
