@@ -885,7 +885,7 @@
                   </div>
                   <div class="midad-manager-news-card">
                     <div class="midad-manager-panel-title"><i class="fas fa-wand-magic-sparkles"></i><b>ما الجديد 🙂</b></div>
-                    <div class="midad-manager-news-list">${(Array.isArray(pm.news_items)?pm.news_items:[]).length ? pm.news_items.map((n,i)=>`<article class="midad-manager-news-item"><b>${escapeHtml(n.title||'تحديث')}</b><p>${escapeHtml(n.body||'')}</p></article>`).join('') : '<div class="midad-manager-news-empty">مفيش تحديثات جديدة حاليًا ✨</div>'}</div>
+                    <div class="midad-manager-news-list">${(Array.isArray(pm.news_items)?pm.news_items:[]).length ? pm.news_items.map((n,i)=>`<button type="button" class="midad-manager-news-item" data-act="manager-news-view" data-news-index="${i}" aria-label="فتح ${escapeHtml(n.title||'تحديث')}"><b>${escapeHtml(n.title||'تحديث')}</b><span class="midad-manager-news-arrow"><i class="fas fa-arrow-left"></i></span></button>`).join('') : '<div class="midad-manager-news-empty">مفيش تحديثات جديدة حاليًا ✨</div>'}</div>
                   </div>
                 </div>
 
@@ -1360,6 +1360,18 @@
             const m = state.modal;
             if (!m) return '';
 
+
+            if (m.kind === 'manager-news-view') {
+                const item=m.item||{};
+                return `
+                <div class="overlay" data-act="close-modal-overlay">
+                  <div class="modal um-modal midad-manager-news-modal" data-stop="1">
+                    <div class="manager-news-modal-title"><span class="modal-news-icon"><i class="fas fa-wand-magic-sparkles"></i></span><div><small style="display:block;color:var(--text-muted,#64748b);font:800 11px Cairo,sans-serif">ما الجديد 🙂</small><h3 style="margin:2px 0 0">${escapeHtml(item.title||'تحديث')}</h3></div></div>
+                    <div class="manager-news-modal-body">${escapeHtml(item.body||'لا يوجد تفاصيل إضافية لهذا التحديث.')}</div>
+                    <div class="modal-actions"><button class="btn-cancel" data-act="close-modal">إغلاق</button></div>
+                  </div>
+                </div>`;
+            }
 
             if (m.kind === 'welcome-video-preview') {
                 const path=m.path||'';
@@ -2566,6 +2578,13 @@
                     const current=(Array.isArray(state.platformManager?.titles)?state.platformManager.titles:[]).filter(x=>x!==t);
                     state.platformManager={...state.platformManager,titles:current};
                     render();
+                    break;
+                }
+                case 'manager-news-view': {
+                    const idx=Number(el.getAttribute('data-news-index'));
+                    const items=Array.isArray(state.platformManager?.news_items)?state.platformManager.news_items:[];
+                    if(!Number.isInteger(idx)||!items[idx]) return;
+                    openModal('manager-news-view',{item:{title:items[idx].title||'تحديث',body:items[idx].body||''}});
                     break;
                 }
                 case 'manager-news-add': {
