@@ -177,24 +177,33 @@
     const h = await crypto.subtle.digest('SHA-256', buffer);
     return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2,'0')).join('');
   }
-  async function ivExtractMarkers(buffer) {
+  const IV_PDF_PARENT_CACHE = new Map();
+
+  async function ivExtractMarkers(buffer, cacheKey='') {
     try {
-      if (window.InTheVoidPDFFingerprint?.extract) {
-        const rows = await window.InTheVoidPDFFingerprint.extract(buffer);
-        return (Array.isArray(rows) ? rows : []).slice(0, IV_PDF_MAX_PARENT_MARKERS);
+      if (cacheKey && IV_PDF_PARENT_CACHE.has(cacheKey)) {
+        return IV_PDF_PARENT_CACHE.get(cacheKey);
       }
-      const bytes = new Uint8Array(buffer);
-      let raw = ''; const step = 0x8000;
-      for (let i=0;i<bytes.length;i+=step) raw += new TextDecoder('latin1').decode(bytes.subarray(i,Math.min(i+step,bytes.length)));
-      const out = [];
-      const re = /IVFP2:([A-Za-z0-9+\/_=-]+)/g; let m;
-      while ((m=re.exec(raw)) && out.length < IV_PDF_MAX_PARENT_MARKERS) {
-        const decoded = ivB64ToUtf8(m[1]);
-        if (!decoded) continue;
-        try { const obj=JSON.parse(decoded); if (obj && obj.f) out.push(obj); } catch (_) {}
+      let result = [];
+      if (window.InTheVoidPDFFingerprint?.extractLatest) {
+        const rows = await window.InTheVoidPDFFingerprint.extractLatest(buffer);
+        result = (Array.isArray(rows) ? rows : []).slice(0, IV_PDF_MAX_PARENT_MARKERS);
+      } else {
+        const bytes = new Uint8Array(buffer);
+        let raw = ''; const step = 0x8000;
+        for (let i=0;i<bytes.length;i+=step) raw += new TextDecoder('latin1').decode(bytes.subarray(i,Math.min(i+step,bytes.length)));
+        const out = [];
+        const re = /IVFP2:([A-Za-z0-9+\/_=-]+)/g; let m;
+        while ((m=re.exec(raw)) && out.length < IV_PDF_MAX_PARENT_MARKERS) {
+          const decoded = ivB64ToUtf8(m[1]);
+          if (!decoded) continue;
+          try { const obj=JSON.parse(decoded); if (obj && obj.f) out.push(obj); } catch (_) {}
+        }
+        const seen = new Set();
+        result = out.filter(x => !seen.has(x.f) && seen.add(x.f));
       }
-      const seen = new Set();
-      return out.filter(x => !seen.has(x.f) && seen.add(x.f));
+      if (cacheKey) IV_PDF_PARENT_CACHE.set(cacheKey, result);
+      return result;
     } catch (_) { return []; }
   }
   function ivRoleLabel(role) {
@@ -215,35 +224,68 @@
   async function ivFingerprintPdf(blob, meta) {
     if (!window.PDFLib) throw new Error('مكتبة معالجة PDF غير متاحة.');
     const input = await blob.arrayBuffer();
-    const parents = await ivExtractMarkers(input);
+
+    // Parent extraction is expensive on large PDFs. Cache it for the same
+    // source path/size during the session, while keeping the original
+    // extraction logic for the first download.
+    const head = new Uint8Array(input.slice(0,128));
+    const tail = new Uint8Array(input.slice(Math.max(0,input.byteLength-128)));
+    const cacheKey = `${meta.path || meta.name || 'pdf'}::${blob.size}::${Array.from(head).join(',')}::${Array.from(tail).join(',')}`;
+    const parentsPromise = ivExtractMarkers(input, cacheKey);
+
+    // Do not make the database round-trip wait for the forensic scan.
     const ts = new Date().toISOString();
     const parts = ivCairoParts(ts);
-    const fpRow = await sb.rpc('midad_register_pdf_download', {
+    const fpRowPromise = sb.rpc('midad_register_pdf_download', {
       p_material_id: meta.materialId ?? null,
       p_file_name: meta.name || null,
       p_source_path: meta.path || null,
-      p_parent_fingerprints: parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS),
-      p_parent_count: parents.length
+      p_parent_fingerprints: [],
+      p_parent_count: 0
     });
+
+    const [parents, fpRow] = await Promise.all([parentsPromise, fpRowPromise]);
     if (fpRow.error) throw fpRow.error;
     const rec = fpRow.data;
-    const payload = { v:2, f:rec.fingerprint, u:rec.user_id, n:rec.user_name, r:rec.role_label || ivRoleLabel(rec.role), d:rec.download_date || parts.date, t:rec.download_time || parts.time, w:rec.download_day || parts.day, p:parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS) };
+
+    // Keep the full forensic payload, including parent markers.
+    // Use ASCII-only Base64 payload so Standard Helvetica is always safe.
+    const parentFingerprints = parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS);
+    const payload = {
+      v:2, f:rec.fingerprint, u:rec.user_id, n:rec.user_name,
+      r:rec.role_label || ivRoleLabel(rec.role),
+      d:rec.download_date || parts.date, t:rec.download_time || parts.time,
+      w:rec.download_day || parts.day, p:parentFingerprints
+    };
     const marker = IV_PDF_FP_PREFIX + ivUtf8ToB64(JSON.stringify(payload));
-    const pdf = await window.PDFLib.PDFDocument.load(input, { updateMetadata:false, ignoreEncryption:false });
+
+    const pdf = await window.PDFLib.PDFDocument.load(input, {
+      updateMetadata:false,
+      ignoreEncryption:false
+    });
     const font = await pdf.embedFont(window.PDFLib.StandardFonts.Helvetica);
-    for (const page of pdf.getPages()) {
-      // Tiny, white, off-canvas markers. Multiple copies per page provide redundancy
-      // while remaining visually absent in normal viewing/printing.
+
+    // One redundant marker per page is enough for recovery and is much
+    // cheaper than writing four copies on every page.
+    const pages = pdf.getPages();
+    for (const page of pages) {
       const { width, height } = page.getSize();
-      const positions = [[-180,-180],[-420,height+40],[width+40,-420],[width+20,height+20]];
-      for (const [x,y] of positions) page.drawText(marker,{x,y,size:0.01,font,color:window.PDFLib.rgb(1,1,1),opacity:0});
+      page.drawText(marker, {
+        x:-180, y:-180, size:0.01, font,
+        color:window.PDFLib.rgb(1,1,1), opacity:0
+      });
     }
-    // A neutral, non-identifying internal producer value is deliberately omitted.
+
     const output = await pdf.save({ useObjectStreams:true, addDefaultPage:false });
     const finalHash = await ivSha256Hex(output);
     const downloadId = rec?.download_id || rec?.id;
     if (!downloadId) throw new Error('DOWNLOAD_ID_MISSING');
-    const confirm = await sb.rpc('midad_finalize_pdf_download', { p_download_id: downloadId, p_final_sha256: finalHash, p_parent_fingerprints: parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS) });
+
+    const confirm = await sb.rpc('midad_finalize_pdf_download', {
+      p_download_id: downloadId,
+      p_final_sha256: finalHash,
+      p_parent_fingerprints: parentFingerprints
+    });
     if (confirm.error) throw confirm.error;
     return new Blob([output],{type:'application/pdf'});
   }
