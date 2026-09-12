@@ -504,6 +504,12 @@
         function render() {
             const app = document.getElementById('app');
 
+            // Exposed so other scripts (theme-system.js) can react to the
+            // current page without needing access to this script's own
+            // closure-scoped `state` (which it can't reach — it has its own
+            // unrelated local `state` object).
+            window.__midadCurrentView = state.view;
+
             if (state.view === 'login') {
                 app.innerHTML = renderLogin();
             } else {

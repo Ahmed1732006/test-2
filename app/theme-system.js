@@ -216,15 +216,22 @@
       b.title = 'السمات';
       b.setAttribute('aria-label', 'السمات');
       b.onclick = (e) => { e.stopPropagation(); openThemePicker(state.isAdmin ? 'admin' : 'user'); };
-      b.onmouseenter = () => { b.style.transform = position === 'bottom' ? 'translateX(-50%) translateY(-2px)' : 'translateY(-1px)'; };
-      b.onmouseleave = () => { b.style.transform = position === 'bottom' ? 'translateX(-50%)' : ''; };
+      b.onmouseenter = () => { b.style.transform = 'translateY(-2px)'; };
+      b.onmouseleave = () => { b.style.transform = ''; };
     }
     if (position === 'bottom') {
+      // Anchored bottom-left, same corner as the admin "إدارة السمات" button
+      // (#midadThemeManage), instead of the old center-of-screen placement.
+      // These two buttons never render for the same session (one is
+      // admin-only, the other member-only) — see addBottomThemeButton and
+      // addManageButton — but positionBottomThemeButton() below still
+      // defensively re-stacks this one above the manage button if it ever
+      // finds both present, so nothing overlaps.
       b.style.cssText = [
-        'position:fixed','left:50%','bottom:18px','transform:translateX(-50%)','z-index:99980',
+        'position:fixed','left:22px','bottom:20px','right:auto','transform:none','z-index:99980',
         'display:inline-flex','align-items:center','justify-content:center','gap:7px','min-width:96px','height:44px','padding:0 15px',
         'border:1px solid var(--border,#e2e8f0)','background:var(--surface,#fff)','color:var(--primary,#0ea5e9)','border-radius:14px',
-        'font:800 13px Cairo,sans-serif','cursor:pointer','box-shadow:0 10px 28px rgba(15,23,42,.16)','transition:transform .18s,box-shadow .18s,border-color .18s',
+        'font:800 13px Cairo,sans-serif','cursor:pointer','box-shadow:0 10px 28px rgba(15,23,42,.16)','transition:transform .18s,box-shadow .18s,border-color .18s,bottom .18s',
         'direction:rtl','white-space:nowrap'
       ].join(';');
       return b;
@@ -252,8 +259,29 @@
     createThemeButton('midadThemeButton', 'top');
   }
 
+  function positionBottomThemeButton(b) {
+    // Safety net: the member bottom button and the admin "إدارة السمات"
+    // button (#midadThemeManage) share the same bottom-left spot but never
+    // render for the same session in the current app. If that ever changes
+    // and both end up in the DOM together, stack this one above the manage
+    // button instead of overlapping it.
+    if (!b) return;
+    const manage = document.getElementById('midadThemeManage');
+    if (manage && manage.offsetParent !== null) {
+      b.style.bottom = (20 + manage.offsetHeight + 12) + 'px';
+    } else {
+      b.style.bottom = '20px';
+    }
+  }
+
   function addBottomThemeButton() {
-    if (state.isAdmin || !state.userThemeBottomButtonEnabled || window.__midadViewAsMember) {
+    // Hide on the "subsection" page (the رفوف/rectangles list with the
+    // تحميل buttons — window.__midadCurrentView is set by app/index.html's
+    // render() on every navigation) since the fixed bottom-left button
+    // covers the last row's تحميل label there. It reappears automatically
+    // the moment the view changes back, via the same MutationObserver that
+    // re-adds this button after every render() — no manual refresh needed.
+    if (state.isAdmin || !state.userThemeBottomButtonEnabled || window.__midadViewAsMember || window.__midadCurrentView === 'subsection') {
       const old = document.getElementById('midadThemeBottomButton');
       if (old) old.remove();
       return;
@@ -261,6 +289,7 @@
     if (!document.body) return;
     const b = createThemeButton('midadThemeBottomButton', 'bottom');
     if (b && !b.parentNode) document.body.appendChild(b);
+    positionBottomThemeButton(b);
   }
 
   function applyViewAsMemberMode() {
