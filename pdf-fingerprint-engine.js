@@ -196,44 +196,5 @@
     }catch(_){ }
     return out;
   }
-
-  // Fast path used by the downloader: a fingerprinted PDF writes the current
-  // marker redundantly, and that marker already contains its parent chain.
-  // We only need the first valid current marker here; the full scanner keeps
-  // using extract() and therefore retains complete history scanning.
-  async function extractLatest(buffer){
-    const bytes=new Uint8Array(buffer);
-    const out=[],seen=new Set();
-    try{
-      scanRawNeedles(bytes,out,seen);
-      if(out.length) return out.slice(0,1);
-      addFromPdfStrings(bytes,out,seen);
-      if(out.length) return out.slice(0,1);
-    }catch(_){}
-    try{
-      const streamRe=new TextEncoder().encode('stream');
-      for(let i=0;i<bytes.length-streamRe.length;i++){
-        if(bytes[i]!==115||bytes[i+1]!==116||bytes[i+2]!==114||bytes[i+3]!==101||bytes[i+4]!==97||bytes[i+5]!==109) continue;
-        const dictStart=Math.max(0,i-4096);
-        const prefix=bytesToLatin1(bytes.subarray(dictStart,i));
-        const objIdx=prefix.lastIndexOf('obj');
-        const dictText=objIdx>=0?prefix.slice(objIdx+3):prefix;
-        let dataStart=i+6;
-        if(bytes[dataStart]===13&&bytes[dataStart+1]===10)dataStart+=2;
-        else if(bytes[dataStart]===10||bytes[dataStart]===13)dataStart+=1;
-        const end=findEndStream(bytes,dataStart); if(end<0) continue;
-        const raw=bytes.subarray(dataStart,end);
-        let decoded=null;
-        if(/\/FlateDecode\b|\/Fl\b|\/ASCIIHexDecode\b|\/ASCII85Decode\b/.test(dictText)){
-          decoded=await decodeStream(new TextEncoder().encode(dictText),raw);
-        }
-        const target=decoded||raw;
-        addFromText(bytesToLatin1(target),out,seen);
-        addFromPdfStrings(target,out,seen);
-        if(out.length) return out.slice(0,1);
-      }
-    }catch(_){}
-    return [];
-  }
-  window.InTheVoidPDFFingerprint={extract,extractLatest,decodeB64Utf8,addFromText,PREFIX};
+  window.InTheVoidPDFFingerprint={extract,decodeB64Utf8,addFromText,PREFIX};
 })();

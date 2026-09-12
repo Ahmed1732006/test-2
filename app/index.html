@@ -515,6 +515,7 @@
             if (isRealAdmin() && state.viewAsMember) app.innerHTML += renderViewAsMemberBanner();
 
             attachEvents();
+            if (state.view === 'profile') setTimeout(refreshPdfPreparationStatusCard, 40);
         }
 
         function renderViewAsMemberBanner(){
@@ -887,6 +888,31 @@
             </section>`;
         }
 
+        async function refreshPdfPreparationStatusCard() {
+            const box = document.getElementById('midad-pdf-prep-status');
+            if (!box) return;
+            try {
+                const r = await sb.rpc('midad_get_my_pdf_preparation_status');
+                if (r.error) { box.hidden = true; return; }
+                const d = r.data || {};
+                const total = Number(d.total || 0), ready = Number(d.ready || 0), processing = Number(d.processing || 0), errors = Number(d.errors || 0);
+                const pct = total ? Math.min(100, Math.round((ready / total) * 100)) : 100;
+                box.hidden = false;
+                box.innerHTML = `
+                  <div class="midad-pdf-prep-head">
+                    <div><i class="fas fa-bolt"></i><div><strong>تجهيز نسخ الـPDF</strong><small>Supabase بيجهز نسخة خاصة بحسابك مسبقًا بالبصمة.</small></div></div>
+                    <b class="${pct>=100?'ready':''}">${pct}%</b>
+                  </div>
+                  <div class="midad-pdf-prep-progress"><i style="width:${pct}%"></i></div>
+                  <div class="midad-pdf-prep-meta">
+                    <span>جاهز: <b>${ready}</b> / ${total}</span>
+                    ${processing ? `<span>قيد التجهيز: <b>${processing}</b></span>` : `<span class="ok"><i class="fas fa-check"></i> كل الجاهز متاح فورًا</span>`}
+                    ${errors ? `<span class="warn">يحتاج إعادة تجهيز: <b>${errors}</b></span>` : ''}
+                  </div>
+                  <small class="midad-pdf-prep-note">${pct>=100 ? '🟢 كل نسخ الـPDF المتاحة لك جاهزة للتحميل.' : '⏳ لو ضغطت تحميل قبل اكتمال النسخة، هنستنى تجهيزها تلقائيًا ثم يبدأ التحميل.'}</small>`;
+            } catch (_) { box.hidden = true; }
+        }
+
         function renderProfilePage() {
             const u = state.user || {};
             const initial = (u.name || 'عضو').charAt(0).toUpperCase();
@@ -909,6 +935,7 @@
                       <span class="profile-role"><i class="fas fa-user"></i>${roleLabel}</span>
                     </div>
                   </div>
+                  <div id="midad-pdf-prep-status" class="midad-pdf-prep-status" hidden></div>
                   <div class="profile-info-grid">
                     <div class="profile-info-row"><div class="profile-info-label">الاسم</div><div class="profile-info-value">${u.name || 'غير محدد'}</div></div>
                     <div class="profile-info-row"><div class="profile-info-label">البريد الإلكتروني</div><div class="profile-info-value">${u.email || 'غير محدد'}</div></div>

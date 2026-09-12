@@ -177,33 +177,24 @@
     const h = await crypto.subtle.digest('SHA-256', buffer);
     return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2,'0')).join('');
   }
-  const IV_PDF_PARENT_CACHE = new Map();
-
-  async function ivExtractMarkers(buffer, cacheKey='') {
+  async function ivExtractMarkers(buffer) {
     try {
-      if (cacheKey && IV_PDF_PARENT_CACHE.has(cacheKey)) {
-        return IV_PDF_PARENT_CACHE.get(cacheKey);
+      if (window.InTheVoidPDFFingerprint?.extract) {
+        const rows = await window.InTheVoidPDFFingerprint.extract(buffer);
+        return (Array.isArray(rows) ? rows : []).slice(0, IV_PDF_MAX_PARENT_MARKERS);
       }
-      let result = [];
-      if (window.InTheVoidPDFFingerprint?.extractLatest) {
-        const rows = await window.InTheVoidPDFFingerprint.extractLatest(buffer);
-        result = (Array.isArray(rows) ? rows : []).slice(0, IV_PDF_MAX_PARENT_MARKERS);
-      } else {
-        const bytes = new Uint8Array(buffer);
-        let raw = ''; const step = 0x8000;
-        for (let i=0;i<bytes.length;i+=step) raw += new TextDecoder('latin1').decode(bytes.subarray(i,Math.min(i+step,bytes.length)));
-        const out = [];
-        const re = /IVFP2:([A-Za-z0-9+\/_=-]+)/g; let m;
-        while ((m=re.exec(raw)) && out.length < IV_PDF_MAX_PARENT_MARKERS) {
-          const decoded = ivB64ToUtf8(m[1]);
-          if (!decoded) continue;
-          try { const obj=JSON.parse(decoded); if (obj && obj.f) out.push(obj); } catch (_) {}
-        }
-        const seen = new Set();
-        result = out.filter(x => !seen.has(x.f) && seen.add(x.f));
+      const bytes = new Uint8Array(buffer);
+      let raw = ''; const step = 0x8000;
+      for (let i=0;i<bytes.length;i+=step) raw += new TextDecoder('latin1').decode(bytes.subarray(i,Math.min(i+step,bytes.length)));
+      const out = [];
+      const re = /IVFP2:([A-Za-z0-9+\/_=-]+)/g; let m;
+      while ((m=re.exec(raw)) && out.length < IV_PDF_MAX_PARENT_MARKERS) {
+        const decoded = ivB64ToUtf8(m[1]);
+        if (!decoded) continue;
+        try { const obj=JSON.parse(decoded); if (obj && obj.f) out.push(obj); } catch (_) {}
       }
-      if (cacheKey) IV_PDF_PARENT_CACHE.set(cacheKey, result);
-      return result;
+      const seen = new Set();
+      return out.filter(x => !seen.has(x.f) && seen.add(x.f));
     } catch (_) { return []; }
   }
   function ivRoleLabel(role) {
@@ -224,80 +215,126 @@
   async function ivFingerprintPdf(blob, meta) {
     if (!window.PDFLib) throw new Error('مكتبة معالجة PDF غير متاحة.');
     const input = await blob.arrayBuffer();
-
-    // Parent extraction is expensive on large PDFs. Cache it for the same
-    // source path/size during the session, while keeping the original
-    // extraction logic for the first download.
-    const head = new Uint8Array(input.slice(0,128));
-    const tail = new Uint8Array(input.slice(Math.max(0,input.byteLength-128)));
-    const cacheKey = `${meta.path || meta.name || 'pdf'}::${blob.size}::${Array.from(head).join(',')}::${Array.from(tail).join(',')}`;
-    const parentsPromise = ivExtractMarkers(input, cacheKey);
-
-    // Do not make the database round-trip wait for the forensic scan.
+    const parents = await ivExtractMarkers(input);
     const ts = new Date().toISOString();
     const parts = ivCairoParts(ts);
-    const fpRowPromise = sb.rpc('midad_register_pdf_download', {
+    const fpRow = await sb.rpc('midad_register_pdf_download', {
       p_material_id: meta.materialId ?? null,
       p_file_name: meta.name || null,
       p_source_path: meta.path || null,
-      p_parent_fingerprints: [],
-      p_parent_count: 0
+      p_parent_fingerprints: parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS),
+      p_parent_count: parents.length
     });
-
-    const [parents, fpRow] = await Promise.all([parentsPromise, fpRowPromise]);
     if (fpRow.error) throw fpRow.error;
     const rec = fpRow.data;
-
-    // Keep the full forensic payload, including parent markers.
-    // Use ASCII-only Base64 payload so Standard Helvetica is always safe.
-    const parentFingerprints = parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS);
-    const payload = {
-      v:2, f:rec.fingerprint, u:rec.user_id, n:rec.user_name,
-      r:rec.role_label || ivRoleLabel(rec.role),
-      d:rec.download_date || parts.date, t:rec.download_time || parts.time,
-      w:rec.download_day || parts.day, p:parentFingerprints
-    };
+    const payload = { v:2, f:rec.fingerprint, u:rec.user_id, n:rec.user_name, r:rec.role_label || ivRoleLabel(rec.role), d:rec.download_date || parts.date, t:rec.download_time || parts.time, w:rec.download_day || parts.day, p:parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS) };
     const marker = IV_PDF_FP_PREFIX + ivUtf8ToB64(JSON.stringify(payload));
-
-    const pdf = await window.PDFLib.PDFDocument.load(input, {
-      updateMetadata:false,
-      ignoreEncryption:false
-    });
+    const pdf = await window.PDFLib.PDFDocument.load(input, { updateMetadata:false, ignoreEncryption:false });
     const font = await pdf.embedFont(window.PDFLib.StandardFonts.Helvetica);
-
-    // One redundant marker per page is enough for recovery and is much
-    // cheaper than writing four copies on every page.
-    const pages = pdf.getPages();
-    for (const page of pages) {
+    for (const page of pdf.getPages()) {
+      // Tiny, white, off-canvas markers. Multiple copies per page provide redundancy
+      // while remaining visually absent in normal viewing/printing.
       const { width, height } = page.getSize();
-      page.drawText(marker, {
-        x:-180, y:-180, size:0.01, font,
-        color:window.PDFLib.rgb(1,1,1), opacity:0
-      });
+      const positions = [[-180,-180],[-420,height+40],[width+40,-420],[width+20,height+20]];
+      for (const [x,y] of positions) page.drawText(marker,{x,y,size:0.01,font,color:window.PDFLib.rgb(1,1,1),opacity:0});
     }
-
+    // A neutral, non-identifying internal producer value is deliberately omitted.
     const output = await pdf.save({ useObjectStreams:true, addDefaultPage:false });
     const finalHash = await ivSha256Hex(output);
     const downloadId = rec?.download_id || rec?.id;
     if (!downloadId) throw new Error('DOWNLOAD_ID_MISSING');
-
-    const confirm = await sb.rpc('midad_finalize_pdf_download', {
-      p_download_id: downloadId,
-      p_final_sha256: finalHash,
-      p_parent_fingerprints: parentFingerprints
-    });
+    const confirm = await sb.rpc('midad_finalize_pdf_download', { p_download_id: downloadId, p_final_sha256: finalHash, p_parent_fingerprints: parents.map(x=>x.f).slice(0,IV_PDF_MAX_PARENT_MARKERS) });
     if (confirm.error) throw confirm.error;
     return new Blob([output],{type:'application/pdf'});
+  }
+
+  async function midadKickPdfPreparation(action, payload={}) {
+    try {
+      if (!sb?.functions?.invoke) return null;
+      return await sb.functions.invoke('prepare-pdfs', { body: { action, ...payload } });
+    } catch (e) {
+      console.warn('PDF preparation worker unavailable', e);
+      return null;
+    }
+  }
+  window.midadRequestMaterialPreparation = (materialId) =>
+    midadKickPdfPreparation('prepare_material', { material_id: Number(materialId) });
+  window.midadRequestUserPreparation = (userId) =>
+    midadKickPdfPreparation('prepare_user', { user_id: userId });
+  window.midadProcessPdfQueue = () => midadKickPdfPreparation('process_queue');
+
+  // Pre-generated PDF path: Supabase prepares one fingerprinted copy per member
+  // in the background. The browser only downloads that ready copy.
+  async function ivGetPreparedPdf(materialId) {
+    if (!materialId) return null;
+    try {
+      const r = await sb.rpc('midad_get_my_pdf_prepared', { p_material_id: Number(materialId) });
+      if (r.error) return null; // old installations keep the legacy path
+      return Array.isArray(r.data) ? (r.data[0] || null) : (r.data || null);
+    } catch (_) { return null; }
+  }
+  async function ivWaitPreparedPdf(materialId, name) {
+    if (!materialId) return null;
+    let last = -1;
+    for (let i=0;i<90;i++) {
+      const row = await ivGetPreparedPdf(materialId);
+      if (row?.status === 'ready' && row.prepared_path) return row;
+      if (row?.status === 'error') {
+        // Do not break existing downloads if background preparation failed.
+        return null;
+      }
+      const p = Math.max(0, Math.min(99, Number(row?.progress || 0)));
+      if (p !== last) {
+        last = p;
+        showToast(`جاري تجهيز ${name || 'الملف'}… ${p}%`, 'info');
+      }
+      await new Promise(r=>setTimeout(r, 2000));
+    }
+    return null;
+  }
+  async function ivDownloadPrepared(row, name) {
+    const { data: blob, error } = await sb.storage.from('prepared-pdfs').download(row.prepared_path);
+    if (error) throw error;
+    try {
+      await sb.rpc('midad_mark_prepared_pdf_download', { p_prepared_id: row.id });
+    } catch (_) {}
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeDownloadName(name || row.file_name || 'file.pdf');
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
 
   async function downloadStorageBlob(bucket, path, name, meta={}) {
     const user = await requireSignedInForStorage('تحميل الملف');
     const cleanPath = extractStoragePath(path, bucket) || path;
     if (!cleanPath || /^https?:\/\//i.test(cleanPath)) throw new Error('مسار الملف غير صالح للتنزيل الآمن.');
+
+    // Materials PDFs use a server-prepared copy. This is deliberately before
+    // downloading the original so the slow pdf-lib work never runs on a member device.
+    const isPdf = /\.pdf$/i.test(name || cleanPath);
+    if (bucket === 'materials' && isPdf && meta.materialId) {
+      let prepared = await ivGetPreparedPdf(meta.materialId);
+      if (!prepared || prepared.status !== 'ready') {
+        prepared = await ivWaitPreparedPdf(meta.materialId, name);
+      }
+      if (prepared?.status === 'ready' && prepared.prepared_path) {
+        await ivDownloadPrepared(prepared, name);
+        showToast('تم تحميل النسخة الجاهزة بالبصمة.', 'success');
+        return;
+      }
+      // Safe compatibility fallback: if the background worker is unavailable
+      // or reports an error, preserve the old working download path.
+    }
+
     const { data: blob, error } = await sb.storage.from(bucket).download(cleanPath);
     if (error) throw error;
     let output = blob;
-    if ((blob.type === 'application/pdf' || /\.pdf$/i.test(name || cleanPath)) && window.PDFLib) {
+    if (isPdf && window.PDFLib) {
       output = await ivFingerprintPdf(blob, {materialId:meta.materialId ?? null, name:name || deriveOriginalFileName(cleanPath), path:cleanPath, userId:user.id});
     }
     const url = URL.createObjectURL(output);
@@ -310,6 +347,7 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
+
 
   const originalUploadFile = uploadFile;
   uploadFile = async function(bucket, file, folder='uploads') {
@@ -1659,6 +1697,21 @@
 .midad-file-name i{flex:none;opacity:.75;}
 .midad-file-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
+.midad-pdf-prep-status{margin:14px 0;padding:14px;border:1px solid var(--border,#e2e8f0);border-radius:16px;background:var(--surface-alt,#f8fafc);box-shadow:var(--shadow-sm,0 2px 10px #0000000b);direction:rtl}
+.midad-pdf-prep-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.midad-pdf-prep-head>div{display:flex;align-items:center;gap:10px;min-width:0}
+.midad-pdf-prep-head>div>i{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:var(--primary-bg,#eff6ff);color:var(--primary,#2563eb)}
+.midad-pdf-prep-head strong{display:block;font-size:.8rem;color:var(--text,#111827)}
+.midad-pdf-prep-head small{display:block;margin-top:3px;color:var(--text-muted,#64748b);font-size:.65rem;line-height:1.5}
+.midad-pdf-prep-head>b{font-size:1rem;color:var(--primary,#2563eb)}
+.midad-pdf-prep-head>b.ready{color:var(--success,#047857)}
+.midad-pdf-prep-progress{height:8px;margin-top:11px;border-radius:99px;overflow:hidden;background:var(--border-light,#e2e8f0)}
+.midad-pdf-prep-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--primary,#2563eb),var(--purple,#7c3aed));transition:width .35s}
+.midad-pdf-prep-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px;color:var(--text-muted,#64748b);font-size:.65rem}
+.midad-pdf-prep-meta span{padding:4px 7px;border-radius:999px;background:var(--surface,#fff);border:1px solid var(--border,#e2e8f0)}
+.midad-pdf-prep-meta .ok{color:var(--success,#047857)}
+.midad-pdf-prep-meta .warn{color:#b45309}
+.midad-pdf-prep-note{display:block;margin-top:8px;color:var(--text-muted,#64748b);font-size:.63rem;line-height:1.6}
 /* Upload picker: real transparent file input ensures chooser works on desktop/mobile. */
 .midad-dropzone{position:relative;overflow:hidden;}
 .midad-dropzone input[type=file]{display:block!important;position:absolute!important;inset:0!important;width:100%!important;height:100%!important;opacity:0!important;cursor:pointer!important;z-index:5!important;}

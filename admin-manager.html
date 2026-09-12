@@ -386,7 +386,10 @@ async function logout(){await sb.auth.signOut();location.reload();}
 async function loadUsers(){
  $('users').innerHTML='<p class="muted">جاري تحميل المستخدمين...</p>';
  try{const [p,r]=await Promise.all([sb.from('profiles').select('*').order('created_at',{ascending:false}),sb.from('account_requests').select('*').order('created_at',{ascending:false})]);
- if(p.error)throw p.error;if(r.error)throw r.error;users=p.data||[];window.requests=r.data||[];await loadTemporaryRequests();renderStats();fillMessageUsers();renderUsers();$('users').insertAdjacentHTML('beforeend',renderTemporaryRequests());await loadMessageHistory();
+ if(p.error)throw p.error;if(r.error)throw r.error;users=p.data||[];window.requests=r.data||[];await loadTemporaryRequests();renderStats();fillMessageUsers();renderUsers();
+    // Kick the server-side PDF worker after member changes so queued copies start
+    // preparing immediately; the queue remains safe if the worker is unavailable.
+    try { await sb.functions.invoke('prepare-pdfs',{body:{action:'process_queue'}}); } catch (_) {}$('users').insertAdjacentHTML('beforeend',renderTemporaryRequests());await loadMessageHistory();
  }catch(e){$('users').innerHTML='';show('mainStatus','تعذر تحميل المستخدمين: '+(e.message||'خطأ'),'err');}
 }
 function renderStats(){
