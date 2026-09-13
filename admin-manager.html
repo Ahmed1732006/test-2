@@ -385,7 +385,7 @@ async function login(){
  try{const {data,error}=await sb.auth.signInWithPassword({email,password});if(error)throw error;
  const {data:p,error:pe}=await sb.from('profiles').select('id,role,is_owner_admin,full_name,name,email').eq('id',data.user.id).maybeSingle();if(pe)throw pe;
  if(!p?.is_owner_admin){await sb.auth.signOut();throw new Error('هذا الحساب ليس الأدمن المالك.');}
- currentUserId=data.user.id;$('loginView').classList.add('hidden');$('appView').classList.remove('hidden');await loadUsers();
+ currentUserId=data.user.id;$('loginView').classList.add('hidden');$('appView').classList.remove('hidden');await Promise.all([loadUsers(),loadDragonAdminSettings()]);
  }catch(e){show('loginStatus',e.message||'تعذر الدخول','err');}finally{$('loginBtn').disabled=false;$('loginBtn').textContent='دخول';}
 }
 async function logout(){await sb.auth.signOut();location.reload();}
@@ -814,7 +814,7 @@ function staggerCards(container){
  [...container.children].forEach((el,i)=>{el.style.animationDelay=(Math.min(i,10)*35)+'ms';});
 }
 
-sb.auth.getSession().then(async({data})=>{if(!data.session)return;const {data:p}=await sb.from('profiles').select('is_owner_admin').eq('id',data.session.user.id).maybeSingle();if(p?.is_owner_admin){currentUserId=data.session.user.id;$('loginView').classList.add('hidden');$('appView').classList.remove('hidden');loadUsers();}});
+sb.auth.getSession().then(async({data})=>{if(!data.session)return;const {data:p}=await sb.from('profiles').select('is_owner_admin').eq('id',data.session.user.id).maybeSingle();if(p?.is_owner_admin){currentUserId=data.session.user.id;$('loginView').classList.add('hidden');$('appView').classList.remove('hidden');Promise.all([loadUsers(),loadDragonAdminSettings()]);}});
 </script>
 </body>
 </html>

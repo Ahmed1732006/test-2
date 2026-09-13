@@ -92,6 +92,16 @@
 @media(max-width:700px){.platform-button-form-grid{grid-template-columns:1fr}.platform-link-buttons{gap:6px}.platform-link-btn{width:43px;height:43px;border-radius:14px}.platform-button-admin-card{align-items:flex-start}.platform-button-admin-copy small{max-width:52vw}.platform-button-admin-card>div:last-child{flex-basis:100%;order:3}.platform-button-order,.platform-button-admin-actions{justify-content:flex-start}}
 </style>
 
+<style id="interactive-dragon-style">
+/* ─── Interactive Dragon — integrated into the welcome hero ─── */
+.welcome-dragon-shell{position:relative;margin-top:22px;border:1px solid color-mix(in srgb,var(--primary,#2563eb) 18%,var(--border,#e2e8f0));border-radius:24px;overflow:hidden;min-height:220px;background:radial-gradient(420px 220px at 50% 48%,color-mix(in srgb,var(--primary,#2563eb) 11%,transparent),transparent 68%),radial-gradient(260px 180px at 12% 100%,color-mix(in srgb,var(--gold,#22D3C5) 8%,transparent),transparent 70%),linear-gradient(145deg,color-mix(in srgb,var(--surface,#fff) 96%,var(--primary-bg,#eff8ff)),var(--surface,#fff));box-shadow:inset 0 1px 0 rgba(255,255,255,.8),0 12px 30px rgba(15,23,42,.06)}
+.welcome-dragon-shell::before{content:'تنين المنصة 🐉';position:absolute;top:11px;right:14px;z-index:2;padding:5px 10px;border-radius:999px;background:color-mix(in srgb,var(--surface,#fff) 88%,transparent);border:1px solid color-mix(in srgb,var(--primary,#2563eb) 18%,var(--border,#e2e8f0));color:var(--text-secondary,#64748b);font:800 .68rem 'Cairo',sans-serif;box-shadow:0 6px 16px rgba(15,23,42,.05);pointer-events:none}
+.welcome-dragon-frame{display:block;width:100%;height:260px;border:0;background:transparent;position:relative;z-index:1}
+.welcome-dragon-hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:2;font:700 .67rem 'Cairo',sans-serif;color:var(--text-muted,#94a3b8);background:color-mix(in srgb,var(--surface,#fff) 84%,transparent);padding:4px 9px;border-radius:999px;pointer-events:none;white-space:nowrap}
+@media(min-width:760px){.welcome-dragon-shell{min-height:270px;margin-top:24px}.welcome-dragon-frame{height:300px}}
+@media(max-width:520px){.welcome-dragon-shell{margin-top:18px;min-height:205px;border-radius:20px}.welcome-dragon-frame{height:220px}.welcome-dragon-shell::before{font-size:.6rem;top:9px;right:10px}.welcome-dragon-hint{font-size:.6rem;bottom:8px}}
+</style>
+
 <style id="notif-center-style">
 .welcome-section{position:relative}
 .notif-bell-home{position:absolute;top:2px;left:2px;z-index:5}
@@ -717,7 +727,6 @@
                 if(error) throw error;
                 state.dragonControls.userEnabled=next;
                 state.dragonControls.show=next;
-                if(window.MidadInteractiveDragon) window.MidadInteractiveDragon.setVisible(Boolean(next));
                 render();
                 showToast(next?'تم إظهار التنين عندك 🐉':'تم إخفاء التنين عندك','success');
             }catch(e){ showToast(e.message||'تعذر تغيير إعداد التنين','error'); }
@@ -788,6 +797,18 @@
                 ['مساءك جميل 🌙','مساء الخير عليك ✨','نورت في آخر اليوم 🌙'];
             const greetingPool = Math.random() < 0.35 ? timeGreeting : greetingOptions;
             const greeting = greetingPool[Math.floor(Math.random() * greetingPool.length)];
+            // نمرر ألوان السمة الحالية للتنين حتى تظل خلفيته منسجمة مع أي Theme.
+            const dragonStyles = getComputedStyle(document.documentElement);
+            const dragonColor = (name, fallback) => {
+                const value = dragonStyles.getPropertyValue(name).trim();
+                return value || fallback;
+            };
+            const dragonParams = new URLSearchParams({
+                primary: dragonColor('--primary', '#2563eb'),
+                primaryDark: dragonColor('--primary-dark', '#1d4ed8'),
+                accent: dragonColor('--gold', '#22d3c5'),
+                bg: dragonColor('--bg', '#f8fafc')
+            }).toString();
             return `
             <div class="welcome-section anim-fade-up">
               ${renderNotifBell('home')}
@@ -797,6 +818,10 @@
                   <h1>${greeting}، <span>${escapeHtml(state.user.name || 'عضو')}</span> 👋</h1>${renderTitleChips(state.user.profile_title,'welcome-title-chips')}
                 </div>
               </div>
+                            ${state.dragonControls?.show ? `<div class="welcome-dragon-shell anim-fade-up stagger-1" aria-label="التنين التفاعلي">
+                <iframe class="welcome-dragon-frame" title="التنين التفاعلي" loading="eager" src="interactive-dragon.html?${dragonParams}"></iframe>
+                <div class="welcome-dragon-hint">حرّك إصبعك أو الماوس 🐉</div>
+              </div>` : ''}
             </div>
 
             <div class="section-label anim-fade-up stagger-1">
@@ -4567,7 +4592,7 @@ async function listWelcomeVideoObjects(path=''){
                 state.user={id:profile.id||session.user.id, name:profile.full_name||profile.name||session.user.user_metadata?.full_name||'عضو',email:profile.email||session.user.email||'',phone:profile.phone_number||profile.phone||'',avatar:publicStorageUrl('avatars',profile.avatar_path||profile.avatar_url), profile_title:profile.profile_title||'', visible_titles:(profile.visible_titles!=null?profile.visible_titles:null), isOwnerAdmin:!!profile.is_owner_admin};
                 const firstOpen=!profile.first_opened_at&&!profile.first_seen_at;
                 void sb.rpc('record_user_open').then(()=>{},()=>{});
-                await Promise.all([loadData(),loadPlatformManager(),loadWelcomeVideoCampaign(),loadPlatformButtons(),loadNotifCenter(),loadDragonControls()]);state.view='home';render(); if(window.MidadInteractiveDragon) window.MidadInteractiveDragon.setVisible(Boolean(state.dragonControls?.show));
+                await Promise.all([loadData(),loadPlatformManager(),loadWelcomeVideoCampaign(),loadPlatformButtons(),loadNotifCenter(),loadDragonControls()]);state.view='home';render();
                 await new Promise(resolve=>showWelcomeVideoOnce(()=>{if(firstOpen) openModal('first-welcome',{});resolve();}));
                 try{
                     const {data:messages,error:messagesError}=await sb.rpc('midad_get_my_admin_messages');
@@ -4593,7 +4618,25 @@ async function listWelcomeVideoObjects(path=''){
         console.log('👤 العضو:', state.user.name);
         console.log('📂 الأقسام:', state.sections.length);
     </script>
-<script src="interactive-dragon-runtime.js"></script>
+<script>
+// تحديث ألوان التنين تلقائيًا عند تغيير السمة بدون لمس منطق الموقع.
+if (!window.__midadDragonThemeObserver) {
+  window.__midadDragonThemeObserver = new MutationObserver(() => {
+    const frame = document.querySelector('.welcome-dragon-frame');
+    if (!frame) return;
+    const styles = getComputedStyle(document.documentElement);
+    const params = new URLSearchParams({
+      primary: styles.getPropertyValue('--primary').trim() || '#2563eb',
+      primaryDark: styles.getPropertyValue('--primary-dark').trim() || '#1d4ed8',
+      accent: styles.getPropertyValue('--gold').trim() || '#22d3c5',
+      bg: styles.getPropertyValue('--bg').trim() || '#f8fafc'
+    }).toString();
+    const next = 'interactive-dragon.html?' + params;
+    if (!frame.src.endsWith(next)) frame.src = next;
+  });
+  window.__midadDragonThemeObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-midad-theme']});
+}
+</script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="../pdf-fingerprint-engine.js"></script>
