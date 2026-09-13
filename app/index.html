@@ -688,7 +688,8 @@
 
         async function loadDragonControls(){
             try{
-                const {data,error}=await sb.rpc('dragon_get_my_controls');
+                const device = window.matchMedia('(max-width: 759px)').matches ? 'mobile' : 'desktop';
+                const {data,error}=await sb.rpc('dragon_get_my_controls',{p_device:device});
                 if(error) throw error;
                 const row=Array.isArray(data)?data[0]:data;
                 if(row){
@@ -716,6 +717,7 @@
                 if(error) throw error;
                 state.dragonControls.userEnabled=next;
                 state.dragonControls.show=next;
+                if(window.MidadInteractiveDragon) window.MidadInteractiveDragon.setVisible(Boolean(next));
                 render();
                 showToast(next?'تم إظهار التنين عندك 🐉':'تم إخفاء التنين عندك','success');
             }catch(e){ showToast(e.message||'تعذر تغيير إعداد التنين','error'); }
@@ -4565,7 +4567,7 @@ async function listWelcomeVideoObjects(path=''){
                 state.user={id:profile.id||session.user.id, name:profile.full_name||profile.name||session.user.user_metadata?.full_name||'عضو',email:profile.email||session.user.email||'',phone:profile.phone_number||profile.phone||'',avatar:publicStorageUrl('avatars',profile.avatar_path||profile.avatar_url), profile_title:profile.profile_title||'', visible_titles:(profile.visible_titles!=null?profile.visible_titles:null), isOwnerAdmin:!!profile.is_owner_admin};
                 const firstOpen=!profile.first_opened_at&&!profile.first_seen_at;
                 void sb.rpc('record_user_open').then(()=>{},()=>{});
-                await Promise.all([loadData(),loadPlatformManager(),loadWelcomeVideoCampaign(),loadPlatformButtons(),loadNotifCenter(),loadDragonControls()]);state.view='home';render();
+                await Promise.all([loadData(),loadPlatformManager(),loadWelcomeVideoCampaign(),loadPlatformButtons(),loadNotifCenter(),loadDragonControls()]);state.view='home';render(); if(window.MidadInteractiveDragon) window.MidadInteractiveDragon.setVisible(Boolean(state.dragonControls?.show));
                 await new Promise(resolve=>showWelcomeVideoOnce(()=>{if(firstOpen) openModal('first-welcome',{});resolve();}));
                 try{
                     const {data:messages,error:messagesError}=await sb.rpc('midad_get_my_admin_messages');
@@ -4587,10 +4589,11 @@ async function listWelcomeVideoObjects(path=''){
 
 
 
-        console.log('المنصة · V11');
+        console.log('المنصة · V12');
         console.log('👤 العضو:', state.user.name);
         console.log('📂 الأقسام:', state.sections.length);
     </script>
+<script src="interactive-dragon-runtime.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="../pdf-fingerprint-engine.js"></script>
