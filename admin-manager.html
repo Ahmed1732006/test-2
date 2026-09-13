@@ -532,8 +532,9 @@ async function loadMessageHistory(){
   if(!rows.length){box.innerHTML='<p>لا توجد رسائل مرسلة.</p>';return;}
   const ids=rows.map(x=>x.id);
   let reads=[];
-  const rr=await sb.from('message_reads').select('message_id,user_id,seen_at').in('message_id',ids);
-  if(!rr.error)reads=rr.data||[];
+  const rr=await sb.rpc('midad_admin_user_message_reads',{p_message_ids:ids});
+  if(rr.error)throw rr.error;
+  reads=(rr.data||[]).map(x=>({message_id:x.message_id,user_id:x.user_id,read_at:x.read_at,view_count:Number.isFinite(Number(x.view_count))?Number(x.view_count):1}));
   const people=users.filter(u=>!u.is_owner_admin);
   box.innerHTML=rows.map(m=>{
    const rc=reads.filter(x=>String(x.message_id)===String(m.id));
@@ -542,13 +543,15 @@ async function loadMessageHistory(){
    const unseenUsers=targetUsers.filter(u=>!seenIds.has(String(u.id)));
    const seenNames=rc.map(x=>{
     const u=users.find(u=>String(u.id)===String(x.user_id));
-    return u?`${nameOf(u)} — ${new Date(x.seen_at).toLocaleString('ar-EG')}`:'مستخدم';
+    const dt=x.read_at?new Date(x.read_at):null;
+    const stamp=dt && !Number.isNaN(dt.getTime())?` — ${dt.toLocaleString('ar-EG')}`:'';
+    return u?`${nameOf(u)}${stamp}`:'مستخدم';
    });
    const unseenNames=unseenUsers.map(u=>nameOf(u));
    const target=m.target_user_id?'مستخدم محدد':'جميع الحسابات';
    return `<div class="user"><div class="top"><div><div class="name">${esc(m.title||'بدون عنوان')}</div><div class="meta">${target} • ${m.created_at?esc(new Date(m.created_at).toLocaleString('ar-EG')):''}</div></div><button class="btn-red" onclick="deleteMessage('${esc(m.id)}')">${ic('trash')}حذف</button></div><div class="small" style="margin-top:7px;white-space:pre-wrap">${esc(m.body||'')}</div><div class="badges"><span class="badge">${ic('eye')}شافها ${rc.length}</span><span class="badge off">${ic('clock')}لسه مشافهاش ${unseenUsers.length}</span></div><div class="small" style="margin-top:8px"><b>شافها:</b> ${esc(seenNames.length?seenNames.join('، '):'ولا حد لسه')}</div><div class="small" style="margin-top:5px"><b>لسه مشافهاش:</b> ${esc(unseenNames.length?unseenNames.join('، '):'الكل شافها')}</div></div>`;
   }).join('');
- }catch(e){box.innerHTML='';show('historyStatus','تعذر تحميل سجل الرسائل: '+(e.message||'أنشئ جدول message_reads من SQL المرفق.'),'err');}
+ }catch(e){box.innerHTML='';show('historyStatus','تعذر تحميل سجل الرسائل: '+(e.message||'شغّل SQL_NOTIFICATION_V3.sql في Supabase ثم أعد فتح الصفحة.'),'err');}
 }
 async function deleteMessage(id){
  if(!confirm('حذف الرسالة؟ لن تظهر للمستخدم بعد الحذف.'))return;

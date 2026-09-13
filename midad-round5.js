@@ -1064,6 +1064,59 @@
         }
         await saveAccess('material_user_access', 'material_id', id);
       }
+      // Publish announcement MUST live here because round-5 replaces the original saveModal.
+      // This keeps the existing content save flow unchanged while making the automatic
+      // notification actually run after a successful material publish.
+      if ((m.kind === 'item' || m.kind === 'add-item') && newFilePath && document.getElementById('announce-on-publish')?.checked) {
+        try {
+          const announceAudienceMode = document.getElementById('announce-audience-mode')?.value || 'all';
+          const announceTitle = (document.getElementById('announce-title')?.value || 'رفع ملف جديد 🙂').trim() || 'رفع ملف جديد 🙂';
+          const announceSubName = findSub(state.currentSectionId, state.currentSubId)?.name || '';
+          const announceFileName = fileFile?.name || name || 'ملف';
+          let targetType = 'all';
+          let targetUserIds = [];
+          let excludedUserIds = [];
+
+          if (announceAudienceMode === 'selected') {
+            targetType = 'selected';
+            targetUserIds = [...(document.getElementById('announce-users')?.selectedOptions || [])]
+              .map(o => o.value).filter(Boolean);
+            if (!targetUserIds.length) throw new Error('إعلان بالنشر: اختر شخصًا واحدًا على الأقل.');
+          } else if (announceAudienceMode === 'excluded') {
+            targetType = 'excluded';
+            excludedUserIds = [...(document.getElementById('announce-excluded')?.selectedOptions || [])]
+              .map(o => o.value).filter(Boolean);
+          }
+
+          const announceBody = `تم رفع ${announceFileName}${announceSubName ? ` في ${announceSubName}` : ''}`;
+          const ok = window.confirm(`هيتبعت الإشعار ده:\n\nالعنوان: ${announceTitle}\nالموضوع: ${announceBody}\n\nتوافق على الإرسال؟`);
+          if (ok) {
+            const payload = {
+              title: announceTitle,
+              body: announceBody,
+              target_type: targetType,
+              target_user_ids: targetUserIds,
+              excluded_user_ids: excludedUserIds
+            };
+            const {data: notifId, error: notifError} = await sb.rpc('midad_notif_center_admin_send', {
+              p_title: payload.title,
+              p_body: payload.body,
+              p_target_type: payload.target_type,
+              p_target_user_ids: payload.target_user_ids,
+              p_excluded_user_ids: payload.excluded_user_ids,
+              p_media_path: null,
+              p_media_type: null
+            });
+            if (notifError) throw notifError;
+            if (!notifId) throw new Error('قاعدة البيانات لم تُرجع رقم الإشعار بعد الحفظ.');
+            showToast('تم نشر الملف وإرسال الإشعار تلقائيًا ✅', 'success');
+          }
+        } catch (announceErr) {
+          console.error('publish announcement failed', announceErr);
+          showToast(`تم حفظ الملف لكن تعذر إرسال الإشعار: ${announceErr.message || 'خطأ غير معروف'}`, 'error');
+        }
+      }
+
       await loadData();
       closeModal();
       render();
@@ -1078,6 +1131,10 @@
 
   const originalDownloadMaterial = downloadMaterial;
   downloadMaterial = async function(item) {
+    const activeButton = window.__midadActiveDownloadButton;
+    if (activeButton && typeof window.__midadPlayDownloadAnimation === 'function') {
+      window.__midadPlayDownloadAnimation(activeButton);
+    }
     try {
       const rawPath = item?.filePath || item?.fileData;
       if (!rawPath) throw new Error('لا يوجد ملف لهذه المادة.');
@@ -1991,7 +2048,7 @@
         const detail = document.getElementById('midad-pdf-prep-detail');
         if (summary) summary.textContent = total ? `${ready} من ${total} ملف جاهز — ${pct}%` : 'لا توجد ملفات PDF تحتاج تجهيزًا حاليًا.';
         if (bar) bar.style.width = `${pct}%`;
-        if (detail) detail.textContent = `${active} قيد التجهيز${failed ? ` • ${failed} تعذر تجهيزها` : ''}`;
+        if (detail) detail.innerHTML = `<bdi>${active} قيد التجهيز</bdi>${failed ? ` • <bdi>${failed} تعذر تجهيزها</bdi>` : ''}`;
       } catch (e) {
         console.warn('pdf preparation status', e);
       }
@@ -2296,4 +2353,170 @@
     }, true);
   }
 
+})();
+
+/* Final download-button animation.
+   Adapted from the supplied download-button-animation package:
+   same ready -> loading -> complete timing, SVG-style loader/check feel and burst,
+   but mounted on the real .btn-download and started when the real download begins. */
+(() => {
+  if (window.__midadDownloadFxLoaded) return;
+  window.__midadDownloadFxLoaded = true;
+
+  const css = document.createElement('style');
+  css.id = 'midad-download-fx-style';
+  css.textContent = `
+    .btn-download.midad-dl-fx{
+      position:relative;
+      overflow:hidden;
+      isolation:isolate;
+    }
+    .btn-download.midad-dl-fx::before{
+      content:'';
+      position:absolute;
+      inset:0;
+      border-radius:inherit;
+      transform:scaleX(1);
+      transform-origin:center;
+      transition:transform .3s ease;
+      background:rgba(255,255,255,.10);
+      pointer-events:none;
+      z-index:0;
+    }
+    .btn-download.midad-dl-fx > *{position:relative;z-index:1}
+    .btn-download.midad-dl-fx.midad-dl-loading{
+      pointer-events:none;
+      cursor:wait;
+    }
+    .btn-download.midad-dl-fx.midad-dl-loading .midad-dl-label{opacity:0;transition:opacity .15s ease}
+    .btn-download.midad-dl-fx .midad-dl-label{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:6px;
+      transition:opacity .15s ease;
+    }
+    .btn-download.midad-dl-fx .midad-dl-loader{
+      position:absolute;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      gap:4px;
+      z-index:2;
+    }
+    .btn-download.midad-dl-fx.midad-dl-loading .midad-dl-loader{display:flex}
+    .midad-dl-loader i{
+      width:5px;
+      height:5px;
+      border-radius:50%;
+      background:currentColor;
+      animation:midadDlDot 1s ease-in-out infinite;
+    }
+    .midad-dl-loader i:nth-child(2){animation-delay:.1s}
+    .midad-dl-loader i:nth-child(3){animation-delay:.2s}
+    .btn-download.midad-dl-fx.midad-dl-complete .midad-dl-label{opacity:0}
+    .btn-download.midad-dl-fx .midad-dl-check{
+      position:absolute;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:2;
+      font-size:1.02em;
+    }
+    .btn-download.midad-dl-fx.midad-dl-complete .midad-dl-check{
+      display:flex;
+      animation:midadDlPop .35s ease-out;
+    }
+    @keyframes midadDlDot{
+      0%,100%{transform:translateY(0);opacity:.45}
+      25%{transform:translateY(-3px);opacity:1}
+      50%{transform:translateY(0);opacity:.7}
+    }
+    @keyframes midadDlPop{
+      0%{transform:scale(.5);opacity:0}
+      70%{transform:scale(1.18);opacity:1}
+      100%{transform:scale(1);opacity:1}
+    }
+    .midad-dl-confetti{
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      z-index:100600;
+      overflow:hidden;
+    }
+    .midad-dl-confetti span{
+      position:absolute;
+      width:7px;
+      height:11px;
+      border-radius:2px;
+      animation:midadDlFall .85s ease-out forwards;
+      left:var(--x);
+      top:var(--y);
+      background:var(--c);
+      transform:rotate(var(--r));
+    }
+    @keyframes midadDlFall{
+      0%{opacity:1;transform:translate(0,0) rotate(0)}
+      100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(260deg)}
+    }
+  `;
+  document.head.appendChild(css);
+
+  window.__midadPlayDownloadAnimation = function(button){
+    if(!button) return;
+    button.classList.add('midad-dl-fx');
+
+    if(!button.querySelector('.midad-dl-label')){
+      const label=document.createElement('span');
+      label.className='midad-dl-label';
+      while(button.firstChild) label.appendChild(button.firstChild);
+      button.appendChild(label);
+
+      const loader=document.createElement('span');
+      loader.className='midad-dl-loader';
+      loader.innerHTML='<i></i><i></i><i></i>';
+      button.appendChild(loader);
+
+      const check=document.createElement('span');
+      check.className='midad-dl-check';
+      check.innerHTML='<i class="fas fa-check"></i>';
+      button.appendChild(check);
+    }
+
+    button.classList.remove('midad-dl-complete');
+    button.classList.add('midad-dl-loading');
+
+    // Same loading-stage timing as the supplied animation.
+    setTimeout(()=>{
+      if(!document.body.contains(button)) return;
+      button.classList.remove('midad-dl-loading');
+      button.classList.add('midad-dl-complete');
+
+      const rect=button.getBoundingClientRect();
+      const cs=getComputedStyle(button);
+      const palette=[
+        cs.getPropertyValue('--primary').trim() || '#2563eb',
+        cs.getPropertyValue('--primary-light').trim() || '#93c5fd',
+        cs.getPropertyValue('--purple').trim() || cs.getPropertyValue('--gold').trim() || '#7b5cff'
+      ];
+      const wrap=document.createElement('div');
+      wrap.className='midad-dl-confetti';
+
+      for(let i=0;i<18;i++){
+        const s=document.createElement('span');
+        s.style.setProperty('--x',(rect.left+rect.width/2)+'px');
+        s.style.setProperty('--y',(rect.top+rect.height/2)+'px');
+        s.style.setProperty('--dx',((Math.random()-.5)*170)+'px');
+        s.style.setProperty('--dy',(-20-Math.random()*100)+'px');
+        s.style.setProperty('--r',(Math.random()*360)+'deg');
+        s.style.setProperty('--c',palette[i%palette.length]);
+        wrap.appendChild(s);
+      }
+      document.body.appendChild(wrap);
+      setTimeout(()=>wrap.remove(),1000);
+      setTimeout(()=>button.classList.remove('midad-dl-complete'),1200);
+    },1800);
+  };
 })();
