@@ -315,7 +315,7 @@
     try { return await promise; } finally { ivPrepWaiters.delete(key); }
   }
 
-  async function ivDownloadPreparedMaterial(materialId, sourcePath, name, user) {
+  async function ivDownloadPreparedMaterial(materialId, sourcePath, name, user, meta={}) {
     let row = await ivGetPreparedRow(materialId, user.id);
     const sameSource = row && (!row.source_path || row.source_path === sourcePath);
     if (!(sameSource && row.status === 'ready' && Number(row.progress) >= 100 && row.prepared_path)) {
@@ -334,6 +334,10 @@
     a.download = safeDownloadName(name || row.file_name || deriveOriginalFileName(sourcePath) || 'file.pdf');
     a.rel = 'noopener';
     document.body.appendChild(a);
+
+    // The browser starts the actual download only when the anchor is clicked.
+    // Complete the visual animation at that exact hand-off point, not on a timer.
+    try { meta?.onDownloadStart?.(); } catch (_) {}
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
@@ -357,7 +361,7 @@
     // keep the original behavior, so member-upload ZIPs and non-PDF assets are
     // untouched.
     if (bucket === 'materials' && meta.materialId && /\.pdf$/i.test(name || cleanPath)) {
-      return ivDownloadPreparedMaterial(Number(meta.materialId), cleanPath, name, user);
+      return ivDownloadPreparedMaterial(Number(meta.materialId), cleanPath, name, user, meta);
     }
 
     const { data: blob, error } = await sb.storage.from(bucket).download(cleanPath);
@@ -372,10 +376,14 @@
     a.download = safeDownloadName(name || deriveOriginalFileName(cleanPath) || 'file');
     a.rel = 'noopener';
     document.body.appendChild(a);
+
+    // Complete only when the real browser download is handed off.
+    try { meta?.onDownloadStart?.(); } catch (_) {}
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   }
+
 
   const originalUploadFile = uploadFile;
   uploadFile = async function(bucket, file, folder='uploads') {
@@ -1133,16 +1141,35 @@
   const originalDownloadMaterial = downloadMaterial;
   downloadMaterial = async function(item) {
     const activeButton = window.__midadActiveDownloadButton;
-    if (activeButton && typeof window.__midadPlayDownloadAnimation === 'function') {
-      window.__midadPlayDownloadAnimation(activeButton);
+    if (activeButton && typeof window.__midadStartDownloadAnimation === 'function') {
+      window.__midadStartDownloadAnimation(activeButton);
     }
     try {
       const rawPath = item?.filePath || item?.fileData;
       if (!rawPath) throw new Error('لا يوجد ملف لهذه المادة.');
-      await downloadStorageBlob('materials', rawPath, item?.fileName || item?.name || deriveOriginalFileName(rawPath) || 'محاضرة', { materialId: item?.dbId || item?.id || null });
+      await downloadStorageBlob(
+        'materials',
+        rawPath,
+        item?.fileName || item?.name || deriveOriginalFileName(rawPath) || 'محاضرة',
+        {
+          materialId: item?.dbId || item?.id || null,
+          onDownloadStart: () => {
+            if (activeButton && typeof window.__midadCompleteDownloadAnimation === 'function') {
+              window.__midadCompleteDownloadAnimation(activeButton);
+            }
+          }
+        }
+      );
     } catch (e) {
+      if (activeButton && typeof window.__midadCancelDownloadAnimation === 'function') {
+        window.__midadCancelDownloadAnimation(activeButton);
+      }
       console.error('secure material download', e);
       showToast(e?.message || 'تعذّر تحميل الملف. سجّل الدخول وتأكد من صلاحية الحساب.', 'error');
+    } finally {
+      if (window.__midadActiveDownloadButton === activeButton) {
+        window.__midadActiveDownloadButton = null;
+      }
     }
   };
 
@@ -2465,7 +2492,7 @@
   `;
   document.head.appendChild(css);
 
-  window.__midadPlayDownloadAnimation = function(button){
+  window.__midadStartDownloadAnimation = function(button){
     if(!button) return;
     button.classList.add('midad-dl-fx');
 
@@ -2486,15 +2513,21 @@
       button.appendChild(check);
     }
 
+    // Start the original loading stage immediately on the user's click.
+    // The dots remain visible until the real browser download is handed off.
     button.classList.remove('midad-dl-complete');
     button.classList.add('midad-dl-loading');
+  };
 
-    // Same loading-stage timing as the supplied animation.
+  window.__midadCompleteDownloadAnimation = function(button){
+    if(!button || !document.body.contains(button)) return;
+    button.classList.remove('midad-dl-loading');
+    button.classList.add('midad-dl-complete');
+
+    // Keep the supplied animation's completion/burst rhythm:
+    // success state first, burst shortly after.
     setTimeout(()=>{
       if(!document.body.contains(button)) return;
-      button.classList.remove('midad-dl-loading');
-      button.classList.add('midad-dl-complete');
-
       const rect=button.getBoundingClientRect();
       const cs=getComputedStyle(button);
       const palette=[
@@ -2517,7 +2550,22 @@
       }
       document.body.appendChild(wrap);
       setTimeout(()=>wrap.remove(),1000);
-      setTimeout(()=>button.classList.remove('midad-dl-complete'),1200);
-    },1800);
+    },320);
+
+    // Reset after the same completion hold used by the supplied animation.
+    setTimeout(()=>{
+      if(!document.body.contains(button)) return;
+      button.classList.remove('midad-dl-complete');
+    },4320);
+  };
+
+  window.__midadCancelDownloadAnimation = function(button){
+    if(!button || !document.body.contains(button)) return;
+    button.classList.remove('midad-dl-loading','midad-dl-complete');
+  };
+
+  // Backward compatibility for any other code that still calls the old name.
+  window.__midadPlayDownloadAnimation = function(button){
+    window.__midadStartDownloadAnimation(button);
   };
 })();

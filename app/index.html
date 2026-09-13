@@ -155,6 +155,17 @@
 .session-guard-card p{margin:0 0 18px;color:#475569}
 .session-guard-card .access-home-btn{background:rgb(60,97,153);color:#fff;border:0;border-radius:14px;padding:12px 18px;font-weight:800;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .session-guard-card .access-home-btn:hover{background:rgb(48,80,130)}
+/* Session guard: transparent glass card, background/dragon remain unchanged. */
+.session-guard-card{background:linear-gradient(145deg,rgba(255,255,255,.25),rgba(255,255,255,.11));border:1px solid rgba(255,255,255,.55);border-radius:28px;padding:30px 28px 26px;box-shadow:0 24px 60px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.45),inset 0 -1px 0 rgba(0,0,0,.08);backdrop-filter:blur(6px) saturate(115%);-webkit-backdrop-filter:blur(6px) saturate(115%);max-width:430px;width:calc(100% - 48px);color:#23383b;text-align:right;direction:rtl}
+.session-guard-card .access-icon{width:64px;height:64px;border-radius:20px;margin:0 auto 16px;display:grid;place-items:center;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.72);box-shadow:0 10px 24px rgba(0,0,0,.12),inset 0 1px 0 rgba(255,255,255,.5);overflow:hidden}
+.session-guard-logo{width:42px;height:42px;display:block;object-fit:contain}
+.session-guard-card .access-kicker{text-align:center;color:rgba(35,56,59,.76);font-weight:900;letter-spacing:.28em;font-size:12px;margin-bottom:9px;direction:ltr}
+.session-guard-card h2{text-align:center;color:#21363d;font-size:clamp(28px,5vw,34px);line-height:1.2;margin:0 0 12px;font-weight:800}
+.session-guard-card p{text-align:center;color:rgba(33,54,61,.92);font-size:15px;line-height:1.85;margin:0 auto 24px;max-width:350px}
+.session-guard-card .access-home-btn{background:rgba(53,81,91,.88);color:#f8fbfb;border:1px solid rgba(255,255,255,.45);border-radius:15px;padding:13px 20px;font-weight:800;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;min-width:160px;box-shadow:0 10px 20px rgba(0,0,0,.15),inset 0 1px 0 rgba(255,255,255,.18);transition:transform .18s ease,background .18s ease}
+.session-guard-card .access-home-btn:hover{transform:translateY(-1px);background:rgba(53,81,91,.96)}
+@media(max-width:520px){.session-guard-card{padding:24px 22px 22px;border-radius:24px;width:calc(100% - 32px)}.session-guard-card .access-icon{width:56px;height:56px;border-radius:18px}.session-guard-logo{width:36px;height:36px}.session-guard-card h2{font-size:28px}.session-guard-card p{font-size:15px}}
+
 .notif-settings-card{border:1px solid var(--border,#e2e8f0);border-radius:18px;padding:16px;background:var(--surface,#fff);margin-bottom:16px}
 .notif-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
 @media(max-width:650px){.notif-settings-grid{grid-template-columns:1fr}}
@@ -1110,6 +1121,7 @@
                   <div class="nice-file-field">
                     <label class="nice-file-label" for="notif-form-media"><i class="fas fa-image"></i><span>اضغط لإضافة صورة أو فيديو</span></label>
                     <input id="notif-form-media" type="file" class="nice-file-input" accept="image/png,image/jpeg,image/gif,video/mp4,video/webm,video/quicktime">
+                    <div class="nice-file-preview" id="notif-form-media-preview"></div>
                   </div>
                   ${mediaUrl ? `<small class="field-hint"><i class="fas fa-paperclip"></i> فيه مرفق محفوظ بالفعل. اختيار ملف جديد يستبدله.</small>` : ''}
                 </div>
@@ -3775,7 +3787,7 @@
                       <g id="session-dragon-screen"></g>
                     </svg>
                     <div class="access-card session-guard-card">
-                      <div class="access-icon"><i class="fas fa-shield-halved"></i></div>
+                      <div class="access-icon"><i class="fas fa-shield-halved" aria-hidden="true"></i></div>
                       <div class="access-kicker">IN THE VOID</div>
                       <h2>${escapeHtml(title)}</h2>
                       <p>${escapeHtml(text)}</p>
@@ -3840,7 +3852,7 @@
                         e.x += (ep.x - e.x + (Math.cos(a) * (100 - i)) / 5) / 4;
                         e.y += (ep.y - e.y + (Math.sin(a) * (100 - i)) / 5) / 4;
                         const s = (162 + 4 * (1 - i)) / 50;
-                        e.use.setAttributeNS(null, 'transform', `translate(${(ep.x + e.x) / 2},${(ep.y + e.y) / 2}) rotate(${(180 / Math.PI) * a}) translate(0,0) scale(${s},${s})`);
+                        e.use.setAttributeNS(null, 'transform', `translate(${(ep.x + e.x) / 2},${(ep.y + e.y) / 2}) rotate(${a * 57.29577951308232}) scale(${s},${s})`);
                     }
                     if (rad < radm) rad++;
                     frm += 0.003;
@@ -3982,6 +3994,7 @@
             wireNiceFileInput('welcome-video-file',{defaultLabel:'اضغط لاختيار فيديو أو اسحبه هنا'});
             wireNiceFileInput('welcome-message-media',{defaultLabel:'اضغط لإضافة صورة أو GIF أو فيديو'});
             wireNiceFileInput('admin-message-media',{defaultLabel:'اضغط لإضافة صورة أو GIF أو فيديو'});
+            wireNiceFileInput('notif-form-media',{defaultLabel:'اضغط لإضافة صورة أو فيديو'});
         }
 
         
