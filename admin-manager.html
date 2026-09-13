@@ -246,7 +246,7 @@ button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
 .btn-cyan:hover,.btn-purple:hover{filter:saturate(1.08) brightness(1.03)}
 .brand-nav-icon{width:18px;height:18px;object-fit:contain;display:block;flex:0 0 auto}
 .login h1{font-size:20px;letter-spacing:.1px}
-</style>
+<style id="dragon-admin-style">.dragon-admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.dragon-admin-row{border:1px solid #dbe5ef;border-radius:14px;padding:12px;background:#f8fafc}.dragon-admin-row label{display:block;font-weight:900;margin-bottom:6px}.dragon-admin-help{font-size:12px;opacity:.72;margin-top:5px}@media(max-width:700px){.dragon-admin-grid{grid-template-columns:1fr}}</style></style>
 </head>
 <body>
 
@@ -265,6 +265,11 @@ button:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="livepill"><i></i>متصل الآن</span><button class="btn-cyan" onclick="window.open('https://in-the-void-eta.vercel.app/','_blank','noopener,noreferrer')"><img class="brand-nav-icon" src="./13.png" alt="">In TheVoid</button><button class="btn-purple" onclick="window.open('https://videomanagement-ivory.vercel.app/','_blank','noopener,noreferrer')"><img class="brand-nav-icon" src="./11.png" alt="">إدارة الفيديوهات</button><button class="btn-gray" onclick="logout()"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>خروج</button></div>
 </div>
 <div class="card"><div class="top"><div><h2 style="margin-bottom:4px"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>نظرة عامة</h2><div class="sub">كل أدوات الإدارة في مكان واحد.</div></div></div><div class="grid" id="stats"></div></div>
+
+<div class="card">
+<div class="top"><div><h2 style="margin:0">🐉 إعدادات التنين</h2><div class="sub">تحكم مستقل في ظهور التنين للأعضاء والإدمن، بدون التأثير على الإشعارات أو رسائل الإدارة.</div></div></div>
+<div id="dragonAdminSettings"><div class="muted">جاري تحميل إعدادات التنين...</div></div>
+</div>
 
 <div class="card">
 <div class="top" style="margin-bottom:10px">
@@ -313,6 +318,8 @@ const SUPABASE_KEY = "sb_publishable_LEFYVl0Y8VOnMIbBZev1Vg_0pYSMWpv";
 const sb = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
 let users=[], currentUserId=null, titleSelection=[], pendingAvatarFile=null;
+let dragonAdminSettings={enabled:true,target_type:'all',default_device_mode:'both',admin_enabled:true,admin_device_mode:'both',members_control_available:false};
+let dragonUserSettingsCache={};
 
 // مجموعة أيقونات SVG موحدة تستخدم بدل الإيموجي في كل الواجهة الديناميكية
 const ICON_PATHS={
@@ -382,6 +389,43 @@ async function login(){
  }catch(e){show('loginStatus',e.message||'تعذر الدخول','err');}finally{$('loginBtn').disabled=false;$('loginBtn').textContent='دخول';}
 }
 async function logout(){await sb.auth.signOut();location.reload();}
+
+async function loadDragonAdminSettings(){
+ try{
+  const {data,error}=await sb.rpc('dragon_admin_get_settings'); if(error)throw error;
+  const row=Array.isArray(data)?data[0]:data;
+  if(row) dragonAdminSettings={...dragonAdminSettings,...row};
+  const g=$('dragonAdminSettings'); if(g) renderDragonAdminSettings();
+ }catch(e){show('mainStatus','تعذر تحميل إعدادات التنين: '+(e.message||'خطأ'),'err');}
+}
+function renderDragonAdminSettings(){
+ const g=$('dragonAdminSettings'); if(!g)return;
+ const s=dragonAdminSettings;
+ g.innerHTML=`<div class="dragon-admin-grid">
+  <div class="dragon-admin-row"><label>🐉 التنين العام</label><select id="dragonEnabled"><option value="true" ${s.enabled?'selected':''}>موجود ومتاح</option><option value="false" ${!s.enabled?'selected':''}>مخفي تمامًا</option></select><div class="dragon-admin-help">إيقافه يخفي التنين عن الجميع.</div></div>
+  <div class="dragon-admin-row"><label>إظهار التنين للأعضاء</label><select id="dragonTarget"><option value="all" ${s.target_type==='all'?'selected':''}>كل الأعضاء</option><option value="selected" ${s.target_type==='selected'?'selected':''}>أعضاء محددين فقط</option></select></div>
+  <div class="dragon-admin-row"><label>أجهزة الأعضاء</label><select id="dragonMemberDevice"><option value="both" ${s.default_device_mode==='both'?'selected':''}>الموبايل والكمبيوتر</option><option value="mobile" ${s.default_device_mode==='mobile'?'selected':''}>الموبايل فقط</option><option value="desktop" ${s.default_device_mode==='desktop'?'selected':''}>الكمبيوتر فقط</option></select></div>
+  <div class="dragon-admin-row"><label>إتاحة زر التحكم للأعضاء</label><select id="dragonMemberControl"><option value="true" ${s.members_control_available?'selected':''}>مسموح إظهاره</option><option value="false" ${!s.members_control_available?'selected':''}>مخفي عن الأعضاء</option></select><div class="dragon-admin-help">هذا لا يحدد من يرى التنين؛ هو فقط يمنح العضو زر إخفائه/إظهاره لنفسه.</div></div>
+  <div class="dragon-admin-row"><label>إظهار التنين للإدمن</label><select id="dragonAdminEnabled"><option value="true" ${s.admin_enabled?'selected':''}>متاح</option><option value="false" ${!s.admin_enabled?'selected':''}>مخفي</option></select></div>
+  <div class="dragon-admin-row"><label>أجهزة الإدمن</label><select id="dragonAdminDevice"><option value="both" ${s.admin_device_mode==='both'?'selected':''}>الموبايل والكمبيوتر</option><option value="mobile" ${s.admin_device_mode==='mobile'?'selected':''}>الموبايل فقط</option><option value="desktop" ${s.admin_device_mode==='desktop'?'selected':''}>الكمبيوتر فقط</option></select></div>
+ </div><div class="actions" style="margin-top:12px"><button class="btn-cyan" onclick="saveDragonAdminSettings()">${ic('check')}حفظ إعدادات التنين</button></div>`;
+}
+async function saveDragonAdminSettings(){
+ try{
+  const payload={p_enabled:$('dragonEnabled').value==='true',p_target_type:$('dragonTarget').value,p_default_device_mode:$('dragonMemberDevice').value,p_admin_enabled:$('dragonAdminEnabled').value==='true',p_admin_device_mode:$('dragonAdminDevice').value,p_members_control_available:$('dragonMemberControl').value==='true'};
+  const {error}=await sb.rpc('dragon_admin_set_settings',payload); if(error)throw error;
+  dragonAdminSettings={enabled:payload.p_enabled,target_type:payload.p_target_type,default_device_mode:payload.p_default_device_mode,admin_enabled:payload.p_admin_enabled,admin_device_mode:payload.p_admin_device_mode,members_control_available:payload.p_members_control_available};
+  show('mainStatus','تم حفظ إعدادات التنين ✅','ok');
+ }catch(e){show('mainStatus','تعذر حفظ إعدادات التنين: '+(e.message||'خطأ'),'err');}
+}
+async function loadDragonUserSettings(id){
+ try{const {data,error}=await sb.rpc('dragon_admin_get_user_settings',{p_user_id:id});if(error)throw error;dragonUserSettingsCache[id]=(Array.isArray(data)?data[0]:data)||null;}
+ catch(e){dragonUserSettingsCache[id]=null;}
+}
+async function saveDragonUserSettings(id){
+ const {error}=await sb.rpc('dragon_admin_set_user',{p_user_id:id,p_allowed:$('dragonAllowed').value==='true',p_control_enabled:$('dragonControl').value==='true',p_device_mode:$('dragonUserDevice').value});
+ if(error) throw error;
+}
 
 async function loadUsers(){
  $('users').innerHTML='<p class="muted">جاري تحميل المستخدمين...</p>';
@@ -644,8 +688,9 @@ async function createInstantAccount(){
  }catch(e){show('quickStatus','لم يتم إنشاء الحساب: '+(e.message||'خطأ'),'err');}
 }
 
-function openEdit(id){
+async function openEdit(id){
  const u=users.find(x=>String(x.id)===String(id));if(!u)return;titleSelection=titleList(u.profile_title);pendingAvatarFile=null;
+ await loadDragonUserSettings(id); const ds=dragonUserSettingsCache[id]||{};
  $('modalRoot').innerHTML=`<div class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal">
  <div class="modal-head"><h2>${ic('edit')}تعديل المستخدم</h2><button class="close" onclick="closeModal()">×</button></div>
  <div class="avatar-edit"><img id="avatarPreview" class="avatar-preview" src="${esc(avatarUrl(u))}" onerror="this.removeAttribute('src')"><div><b>${esc(nameOf(u))}</b><div class="small">اختار صورة جديدة من جهازك أو اترك الصورة الحالية كما هي.</div><label class="file-label">${ic('image')}اختيار صورة<input id="avatarFile" type="file" accept="image/*" onchange="previewAvatar(this)"></label></div></div>
@@ -657,6 +702,9 @@ function openEdit(id){
  <div class="field"><label>الألقاب التي تظهر بجانب الاسم</label><div id="visibleBox">${renderVisiblePicker(u)}</div></div>
  ${u.is_owner_admin?'':`<div class="field"><label>الصلاحية</label><select id="editRole"><option value="member" ${u.role==='member'||u.role==='user'||!u.role?'selected':''}>عضو</option><option value="moderator" ${u.role==='moderator'?'selected':''}>مشرف</option><option value="admin" ${u.role==='admin'||u.role==='super_admin'?'selected':''}>أدمن ذهبي</option></select></div>`}
  <div class="field"><label>تغيير كلمة السر</label><input id="editPassword" type="password" minlength="8" placeholder="اتركها فارغة لعدم التغيير"><select id="editPasswordMode" style="margin-top:7px"><option value="permanent">كلمة سر نهائية — يدخل بها عادي</option><option value="temporary">كلمة سر مؤقتة — يغيرها إجباريًا عند أول دخول</option></select><div class="small">لن تتغير كلمة السر إذا تركت الخانة فارغة.</div></div>
+ <div class="field"><label>🐉 إتاحة التنين لهذا العضو</label><select id="dragonAllowed"><option value="true" ${ds.allowed!==false?'selected':''}>التنين متاح</option><option value="false" ${ds.allowed===false?'selected':''}>التنين غير متاح</option></select></div>
+ <div class="field"><label>زر إتاحة التنين للعضو</label><select id="dragonControl"><option value="true" ${ds.control_enabled===true?'selected':''}>ظاهر للعضو</option><option value="false" ${ds.control_enabled!==true?'selected':''}>مخفي عن العضو</option></select><div class="small">الزر يسمح للعضو بإخفاء/إظهار التنين لنفسه فقط.</div></div>
+ <div class="field"><label>جهاز ظهور التنين لهذا العضو</label><select id="dragonUserDevice"><option value="both" ${(ds.device_mode||'both')==='both'?'selected':''}>الموبايل والكمبيوتر</option><option value="mobile" ${(ds.device_mode||'both')==='mobile'?'selected':''}>الموبايل فقط</option><option value="desktop" ${(ds.device_mode||'both')==='desktop'?'selected':''}>الكمبيوتر فقط</option></select></div>
  <div class="field"><label>${ic('palette')}زر السمات</label><select id="editThemeButton"><option value="true">متاح للمستخدم</option><option value="false">غير متاح للمستخدم</option></select><div class="small">لو متاح، يظهر زر السمات للمستخدم.</div></div>
  <div class="actions"><button onclick="saveEdit('${esc(u.id)}')">${ic('check')}حفظ كل التعديلات</button><button class="btn-gray" onclick="closeModal()">إلغاء</button></div>
  <div id="editStatus" class="status"></div></div></div>`;
@@ -672,6 +720,7 @@ async function saveEdit(id){
  const u=users.find(x=>String(x.id)===String(id));if(!u)return;
  const name=$('editName').value.trim(),phone=$('editPhone').value.trim(),title=titleSelection.join('، ').trim(),role=$('editRole')?.value||u.role||'member';
  const newPassword=$('editPassword')?.value.trim()||'',passwordMode=$('editPasswordMode')?.value||'permanent',themeButton=$('editThemeButton')?.value==='true';
+ const dragonAllowed=$('dragonAllowed')?.value==='true', dragonControl=$('dragonControl')?.value==='true', dragonDevice=$('dragonUserDevice')?.value||'both';
  if(!name)return show('editStatus','اكتب الاسم أولًا.','err');
  if(newPassword&&newPassword.length<8)return show('editStatus','كلمة السر يجب أن تكون 8 أحرف على الأقل.','err');
  const vis=[...document.querySelectorAll('#visibleBox [data-vis].active')].map(x=>x.getAttribute('data-vis')).filter(Boolean);
@@ -685,6 +734,7 @@ async function saveEdit(id){
     const r=await sb.from('profiles').update({avatar_path:avatarPath}).eq('id',id);if(r.error)throw r.error;
   }
   const vr=await sb.rpc('admin_set_visible_titles',{p_user_id:id,p_visible_titles:vis.join('، ')});if(vr.error)throw vr.error; const tp=await sb.from('user_theme_preferences').select('id').eq('user_id',id).maybeSingle(); if(tp.error)throw tp.error; if(tp.data){const tr=await sb.from('user_theme_preferences').update({themes_button_enabled:themeButton}).eq('id',tp.data.id);if(tr.error)throw tr.error;}else{const tr=await sb.from('user_theme_preferences').insert({user_id:id,themes_button_enabled:themeButton,restricted_theme_selection:false});if(tr.error)throw tr.error;}
+  await saveDragonUserSettings(id);
   if(newPassword){
     const rr=await invokeAuthedFunction('admin-set-password',{user_id:id,new_password:newPassword,password_mode:passwordMode});
     if(rr.error) throw new Error(await readEdgeError(rr,'تعذر تشغيل admin-set-password.'));

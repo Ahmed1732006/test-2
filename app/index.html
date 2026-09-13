@@ -220,6 +220,7 @@
             users: [],
             userRequests: [],
             adminMessages: [],
+            dragonControls: {show:true, controlAvailable:false, userEnabled:true, deviceMode:'both', isAdmin:false},
             pendingUserMessages: [],
             notifCenterList: [],
             notifCenterSettings: null,
@@ -683,6 +684,41 @@
             if (state.view === 'users') return renderUsersManagement();
             if (state.view === 'notif-admin') return renderNotifAdminPage();
             return '';
+        }
+
+        async function loadDragonControls(){
+            try{
+                const {data,error}=await sb.rpc('dragon_get_my_controls');
+                if(error) throw error;
+                const row=Array.isArray(data)?data[0]:data;
+                if(row){
+                    const device=String(row.device_mode||'both');
+                    const mobile=window.matchMedia('(max-width: 759px)').matches;
+                    const allowedDevice=device==='both' || (mobile && device==='mobile') || (!mobile && device==='desktop');
+                    state.dragonControls={
+                        show:Boolean(row.show_dragon) && allowedDevice,
+                        controlAvailable:Boolean(row.control_available),
+                        userEnabled:Boolean(row.user_enabled),
+                        deviceMode:device,
+                        isAdmin:Boolean(row.is_admin)
+                    };
+                }
+            }catch(e){
+                console.warn('dragon controls unavailable',e);
+            }
+        }
+
+        async function toggleMyDragonEnabled(){
+            if(!state.dragonControls?.controlAvailable) return;
+            const next=!state.dragonControls.userEnabled;
+            try{
+                const {error}=await sb.rpc('dragon_set_my_enabled',{p_enabled:next});
+                if(error) throw error;
+                state.dragonControls.userEnabled=next;
+                state.dragonControls.show=next;
+                render();
+                showToast(next?'تم إظهار التنين عندك 🐉':'تم إخفاء التنين عندك','success');
+            }catch(e){ showToast(e.message||'تعذر تغيير إعداد التنين','error'); }
         }
 
         // ─── Home ───
@@ -1175,6 +1211,12 @@
                     <div class="profile-info-row"><div class="profile-info-label">رقم الهاتف</div><div class="profile-info-value">${u.phone || 'غير محدد'}</div></div>
                     <div class="profile-info-row"><div class="profile-info-label">نوع الحساب</div><div class="profile-info-value">${isAdmin() ? 'Admin' : 'Member'}</div></div>
                   </div>
+                  ${(!isAdmin() && state.dragonControls?.controlAvailable) ? `<div class="profile-card dragon-self-control-card" style="margin-top:16px;padding:20px 22px;box-sizing:border-box">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                      <div><h3 style="margin:0 0 4px">🐉 إتاحة التنين</h3><p class="access-help" style="margin:0">تقدر تتحكم في ظهوره عندك فقط.</p></div>
+                      <button type="button" class="profile-page-btn ${state.dragonControls.userEnabled?'primary':''}" onclick="toggleMyDragonEnabled()">${state.dragonControls.userEnabled?'التنين ظاهر':'التنين مخفي'}</button>
+                    </div>
+                  </div>` : ''}
                   ${isAdmin() ? `<div class="profile-card" style="margin-top:16px;padding:20px 22px;box-sizing:border-box" id="midad-pdf-prep-card">
                     <h3 style="margin:0 0 4px">📄 حالة تجهيز ملفات PDF</h3>
                     <p class="access-help" style="margin:0 0 10px">Supabase بيجهز النسخ الخاصة بحسابك تلقائيًا. لما الملف يبقى جاهز، التحميل يتم من النسخة الجاهزة مباشرة.</p>
@@ -4523,7 +4565,7 @@ async function listWelcomeVideoObjects(path=''){
                 state.user={id:profile.id||session.user.id, name:profile.full_name||profile.name||session.user.user_metadata?.full_name||'عضو',email:profile.email||session.user.email||'',phone:profile.phone_number||profile.phone||'',avatar:publicStorageUrl('avatars',profile.avatar_path||profile.avatar_url), profile_title:profile.profile_title||'', visible_titles:(profile.visible_titles!=null?profile.visible_titles:null), isOwnerAdmin:!!profile.is_owner_admin};
                 const firstOpen=!profile.first_opened_at&&!profile.first_seen_at;
                 void sb.rpc('record_user_open').then(()=>{},()=>{});
-                await Promise.all([loadData(),loadPlatformManager(),loadWelcomeVideoCampaign(),loadPlatformButtons(),loadNotifCenter()]);state.view='home';render();
+                await Promise.all([loadData(),loadPlatformManager(),loadWelcomeVideoCampaign(),loadPlatformButtons(),loadNotifCenter(),loadDragonControls()]);state.view='home';render();
                 await new Promise(resolve=>showWelcomeVideoOnce(()=>{if(firstOpen) openModal('first-welcome',{});resolve();}));
                 try{
                     const {data:messages,error:messagesError}=await sb.rpc('midad_get_my_admin_messages');
