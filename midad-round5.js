@@ -1067,7 +1067,8 @@
       // Publish announcement MUST live here because round-5 replaces the original saveModal.
       // This keeps the existing content save flow unchanged while making the automatic
       // notification actually run after a successful material publish.
-      if ((m.kind === 'item' || m.kind === 'add-item') && newFilePath && document.getElementById('announce-on-publish')?.checked) {
+      const publishedFilePath = newFilePath || m.fileData || m.filePath || null;
+      if ((m.kind === 'item' || m.kind === 'add-item') && publishedFilePath && document.getElementById('announce-on-publish')?.checked) {
         try {
           const announceAudienceMode = document.getElementById('announce-audience-mode')?.value || 'all';
           const announceTitle = (document.getElementById('announce-title')?.value || 'رفع ملف جديد 🙂').trim() || 'رفع ملف جديد 🙂';

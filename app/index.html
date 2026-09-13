@@ -2014,7 +2014,7 @@
                 </div>
                 <div class="field announce-panel">
                   <label class="announce-toggle-row">
-                    <input type="checkbox" id="announce-on-publish" ${m.announceEnabled?'checked':''} onchange="document.getElementById('announce-audience-wrap').style.display=this.checked?'block':'none'">
+                    <input type="checkbox" id="announce-on-publish" ${m.announceEnabled?'checked':''} onchange="state.modal.announceEnabled=this.checked; document.getElementById('announce-audience-wrap').style.display=this.checked?'block':'none'">
                     <span><i class="fas fa-bullhorn"></i> إعلان بالنشر — ابعت إشعار تلقائيًا عند نشر/رفع ملف هذا المستطيل.</span>
                   </label>
                   <div class="field" id="announce-audience-wrap" style="display:${m.announceEnabled?'block':'none'};margin-top:10px">
