@@ -155,6 +155,22 @@
 .announce-toggle-row input{width:18px;height:18px}
 .notif-publish-preview{padding:10px 12px;border-radius:12px;background:var(--surface,#fff);border:1px dashed var(--border,#dbe5ef);font-size:.72rem;line-height:1.8;color:var(--text-muted,#64748b)}
 .btn-download{position:relative}
+/* زر «عرض» — مستقل عن ملفات السمات (themes) عشان يشتغل بنفس الشكل في كل سمة بدون ما نعدل كل ملف سمة على حدة */
+.item-actions .btn-preview{display:inline-flex!important;align-items:center!important;gap:6px!important;padding:6px 15px!important;border-radius:var(--radius-full,999px)!important;background:var(--surface,#fff)!important;color:var(--primary,#2563eb)!important;font-weight:600!important;font-size:.7rem!important;border:1px solid var(--primary,#2563eb)!important;cursor:pointer!important;transition:all var(--transition,.2s)!important;font-family:var(--font-ar,inherit)!important}
+.item-actions .btn-preview:hover{background:var(--primary-bg,#eef2ff)!important;transform:translateY(-1px)}
+.item-actions .btn-preview:active{transform:scale(.96)}
+.item-actions .btn-preview i{font-size:.65rem!important}
+.item-actions .btn-preview.disabled{opacity:.4!important;cursor:not-allowed!important;pointer-events:none!important}
+.item-buttons-stack{display:flex!important;flex-direction:column!important;gap:6px!important;align-items:stretch!important}
+.item-buttons-stack .btn-download,.item-buttons-stack .btn-preview{width:100%!important;justify-content:center!important}
+.dlonly-panel{margin-top:10px;padding:12px 13px;border:1px dashed var(--border,#dbe5ef);border-radius:13px;background:var(--surface-alt,#f8fafc)}
+.dlonly-panel .dlonly-row{display:flex;flex-wrap:wrap;gap:9px;margin-top:8px}
+.dlonly-panel .dlonly-row label.opt{display:inline-flex;align-items:center;gap:5px;font-size:.76rem;font-weight:700;color:var(--text-secondary,#545b70);cursor:pointer}
+.dlonly-panel select,.dlonly-panel input[type="text"],.dlonly-panel input[type="url"]{width:100%;padding:9px 12px;border:1px solid var(--border,#dbe5ef);border-radius:11px;background:var(--surface,#fff);color:var(--text,#171b2b);font-family:var(--font-ar,inherit);font-size:.82rem;box-sizing:border-box;margin-top:6px}
+.file-preview-modal .fp-media{width:100%;max-height:70vh;border-radius:14px;overflow:hidden;background:#10131c;display:flex;align-items:center;justify-content:center}
+.file-preview-modal .fp-media img,.file-preview-modal .fp-media video{width:100%;max-height:70vh;object-fit:contain;display:block}
+.file-preview-modal .fp-text{width:100%;max-height:70vh;overflow:auto;margin:0;padding:16px;background:#10131c;color:#e5e7eb;white-space:pre-wrap;word-break:break-word;text-align:left;direction:ltr;font-family:monospace;font-size:.82rem}
+.file-preview-modal .fp-frame{width:100%;height:70vh;border:0;background:#fff}
 
 .session-guard-page{position:fixed;inset:0;background:transparent;overflow:hidden;display:flex;align-items:center;justify-content:center;z-index:1}
 .session-guard-svg{position:absolute;inset:0;width:100%;height:100%;background:transparent;opacity:.5;touch-action:none}
@@ -512,6 +528,13 @@
                         sortOrder: Number.isFinite(Number(m.sort_order)) ? Number(m.sort_order) : mi,
                         image: publicStorageUrl('materials', m.image_path || m.image_url || m.image_path_public),
                         fileName: m.title || null, fileData: m.file_path || null, filePath: m.file_path || null,
+                        buttonMode: m.button_mode || 'both',
+                        previewOverride: m.preview_override || 'auto',
+                        dlonlySourceType: m.dlonly_source_type || null,
+                        dlonlyFilePath: m.dlonly_file_path || null,
+                        dlonlyLink: m.dlonly_link || null,
+                        dlonlyDisplayName: m.dlonly_display_name || null,
+                        dlonlyTarget: m.dlonly_target || null,
                         visibilityMode: m.visibility_mode || 'all', ownerId: m.owner_id || null, textBold: m.text_bold !== false, textColor: m.text_color || '#111827',
                         allowedUsers: accessRows.filter(a=>a.access_type==='allow' && String(a.material_id)===String(m.id)).map(a=>String(a.user_id)),
                         excludedUsers: accessRows.filter(a=>a.access_type==='deny' && String(a.material_id)===String(m.id)).map(a=>String(a.user_id))
@@ -570,6 +593,115 @@
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+        }
+
+        // ─── نظام العرض / التحميل الذكي (زر عرض + التحكم اليدوي في download-only.html) ───
+
+        function materialMediaType(pathOrUrl){
+            const clean = String(pathOrUrl||'').split('?')[0].split('#')[0].toLowerCase();
+            const ext = (clean.match(/\.([a-z0-9]+)$/)||[])[1] || '';
+            if(['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext)) return 'image';
+            if(['mp4','webm','mov','mkv','avi','m4v','ogg'].includes(ext)) return 'video';
+            if(ext === 'pdf') return 'pdf';
+            if(ext === 'txt') return 'text';
+            if(ext === 'html' || ext === 'htm') return 'html';
+            return 'other';
+        }
+
+        // لو الامتداد مش واضح من اسم/مسار الملف، نحاول نتعرف على النوع من Content-Type الحقيقي بتاع الملف
+        async function sniffMediaTypeFromUrl(url){
+            try{
+                let res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+                if(!res.ok || !res.headers.get('content-type')) res = await fetch(url, { cache: 'no-store' });
+                const ct = (res.headers.get('content-type') || '').toLowerCase();
+                if(ct.includes('pdf')) return 'pdf';
+                if(ct.includes('image/')) return 'image';
+                if(ct.includes('video/')) return 'video';
+                if(ct.includes('text/html')) return 'html';
+                if(ct.startsWith('text/')) return 'text';
+            }catch(_){ /* تجاهل — هنرجع للسلوك الافتراضي */ }
+            return 'other';
+        }
+
+        async function resolveMaterialFileUrl(path){
+            if(!path) return null;
+            if(/^https?:\/\//i.test(path)) return path;
+            const { data, error } = await sb.storage.from('materials').createSignedUrl(path, 300);
+            if(error) throw error;
+            return data.signedUrl;
+        }
+
+        function viewerBasePath(kind){
+            // kind: 'pdf' | 'download-only' — الملفان منسوخان زي ما هما بدون أي تعديل
+            const inApp = /\/app\/?(index\.html)?$/i.test(window.location.pathname) || window.location.pathname.includes('/app/');
+            const file = kind === 'pdf' ? 'pdf-viewer.html' : 'download-only.html';
+            return inApp ? file : ('app/' + file);
+        }
+
+        function openDownloadOnlyPage(url, name){
+            if(!url) return showToast('لا يوجد رابط لعرضه', 'error');
+            const page = new URL(viewerBasePath('download-only'), window.location.href);
+            page.searchParams.set('url', url);
+            page.searchParams.set('name', name || 'الملف');
+            window.open(page.href, '_blank', 'noopener');
+        }
+
+        function openPdfViewerPage(url, name){
+            if(!url) return showToast('لا يوجد رابط لعرضه', 'error');
+            const page = new URL(viewerBasePath('pdf'), window.location.href);
+            page.searchParams.set('url', url);
+            page.searchParams.set('name', name || 'ملف PDF');
+            window.open(page.href, '_blank', 'noopener');
+        }
+
+        // يحسم مصدر «التحكم اليدوي» الخاص بـ download-only.html: رفع ملف أو رابط
+        async function resolveDlonlySourceUrl(item){
+            if(item.dlonlySourceType === 'link' && item.dlonlyLink) return item.dlonlyLink;
+            if(item.dlonlySourceType === 'upload' && item.dlonlyFilePath) return resolveMaterialFileUrl(item.dlonlyFilePath);
+            return null;
+        }
+
+        async function handlePreviewClick(item){
+            try{
+                const hasManualOverride = item.previewOverride === 'download_only' && item.dlonlyTarget && (item.dlonlyTarget === 'preview' || item.dlonlyTarget === 'both');
+                if(hasManualOverride){
+                    const url = await resolveDlonlySourceUrl(item);
+                    return openDownloadOnlyPage(url, item.dlonlyDisplayName || item.fileName || item.name);
+                }
+                const path = item.filePath || item.fileData;
+                if(!path) return showToast('لا يوجد ملف لهذه المادة', 'error');
+                const url = await resolveMaterialFileUrl(path);
+                let type = materialMediaType(path);
+                if(type === 'other') type = await sniffMediaTypeFromUrl(url);
+                if(type === 'pdf') return openPdfViewerPage(url, item.fileName || item.name);
+                if(type === 'image' || type === 'video' || type === 'text' || type === 'html') return openInlineFilePreview(url, type, item.fileName || item.name);
+                // نوع غير مدعوم للمعاينة المباشرة → صفحة download-only.html تلقائيًا
+                return openDownloadOnlyPage(url, item.fileName || item.name);
+            }catch(e){ showToast(e.message || 'تعذّر عرض الملف', 'error'); }
+        }
+
+        async function openInlineFilePreview(url, type, name){
+            if(type === 'text'){
+                let text = '';
+                try{
+                    const res = await fetch(url, { cache: 'no-store' });
+                    text = await res.text();
+                }catch(e){ return showToast('تعذّر تحميل الملف النصي', 'error'); }
+                return openModal('file-preview', { previewUrl: url, previewType: 'text', previewName: name || 'ملف', previewText: text });
+            }
+            openModal('file-preview', { previewUrl: url, previewType: type, previewName: name || 'ملف' });
+        }
+
+        async function handleDownloadClick(item){
+            try{
+                const useDlonly = item.previewOverride === 'download_only' && item.dlonlyTarget && (item.dlonlyTarget === 'download' || item.dlonlyTarget === 'both');
+                if(useDlonly){
+                    const url = await resolveDlonlySourceUrl(item);
+                    return openDownloadOnlyPage(url, item.dlonlyDisplayName || item.fileName || item.name);
+                }
+                window.__midadActiveDownloadButton = document.querySelector(`[data-act="download-file"][data-item="${item.id}"]`);
+                await downloadMaterial({ filePath: item.filePath || item.fileData, fileData: item.fileData, fileName: item.fileName || 'محاضرة' });
+            }catch(e){ showToast(e.message || 'تعذّر تحميل الملف', 'error'); }
         }
 
         function showToast(msg, type = 'info') {
@@ -917,9 +1049,17 @@
                 const thumbStyle = hasImage ? `background-image:url(${it.image})` : '';
                 const thumbClass = hasImage ? '' : 'placeholder';
                 const hasFile = it.fileData && it.fileData.length > 0;
-                const downloadBtn = hasFile ?
-                    `<button class="btn-download" data-act="download-file" data-file="${it.fileData}" data-name="${it.fileName || 'محاضرة'}"><i class="fas fa-download"></i> تحميل</button>` :
-                    `<button class="btn-download disabled"><i class="fas fa-download"></i> غير متوفر</button>`;
+                const hasDlonlySource = it.previewOverride === 'download_only' && it.dlonlySourceType && (it.dlonlySourceType === 'link' ? !!it.dlonlyLink : !!it.dlonlyFilePath);
+                const canAct = hasFile || hasDlonlySource;
+                const buttonMode = it.buttonMode || 'both';
+                const showDownloadBtn = buttonMode === 'download' || buttonMode === 'both';
+                const showPreviewBtn = buttonMode === 'preview' || buttonMode === 'both';
+                const downloadBtn = !showDownloadBtn ? '' : (canAct ?
+                    `<button class="btn-download" data-act="download-file" data-item="${it.id}"><i class="fas fa-download"></i> تحميل</button>` :
+                    `<button class="btn-download disabled"><i class="fas fa-download"></i> غير متوفر</button>`);
+                const previewBtn = !showPreviewBtn ? '' : (canAct ?
+                    `<button class="btn-preview" data-act="preview-file" data-item="${it.id}"><i class="fas fa-eye"></i> عرض</button>` :
+                    `<button class="btn-preview disabled"><i class="fas fa-eye"></i> غير متوفر</button>`);
                 const adminActions = isAdminRole ? `
                   <div class="card-admin-actions">
                     <button data-act="edit-item" data-item="${it.id}" title="تعديل" data-stop-prop="1"><i class="fas fa-edit"></i></button>
@@ -939,7 +1079,10 @@
                   ${isAdminRole ? `<div class="item-visibility"><i class="fas fa-eye"></i> ${escapeHtml(visibilityLabel(it.visibilityMode))}</div>` : ''}
                 </div>
                 <div class="item-actions">
-                  ${downloadBtn}
+                  <div class="item-buttons-stack">
+                    ${downloadBtn}
+                    ${previewBtn}
+                  </div>
                   ${orderActions}
                 </div>
               </div>`;
@@ -2055,6 +2198,34 @@
               </div>`;
             }
 
+            // File preview modal (video/image/text/html) — عرض مباشر داخل الموقع
+            if (m.kind === 'file-preview') {
+                let mediaHtml;
+                if (m.previewType === 'video') {
+                    mediaHtml = `<video src="${escapeHtml(m.previewUrl)}" controls playsinline preload="metadata"></video>`;
+                } else if (m.previewType === 'image') {
+                    mediaHtml = `<img src="${escapeHtml(m.previewUrl)}" alt="${escapeHtml(m.previewName || '')}">`;
+                } else if (m.previewType === 'text') {
+                    mediaHtml = `<pre class="fp-text">${escapeHtml(m.previewText || '')}</pre>`;
+                } else if (m.previewType === 'html') {
+                    mediaHtml = `<iframe class="fp-frame" src="${escapeHtml(m.previewUrl)}" sandbox="" referrerpolicy="no-referrer"></iframe>`;
+                } else {
+                    mediaHtml = '';
+                }
+                return `
+              <div class="overlay" data-act="close-modal-overlay">
+                <div class="modal file-preview-modal" data-stop="1">
+                  <h3><i class="fas fa-eye"></i> ${escapeHtml(m.previewName || 'معاينة')}</h3>
+                  <div class="fp-media">
+                    ${mediaHtml}
+                  </div>
+                  <div class="modal-actions">
+                    <button class="btn-cancel" data-act="close-modal">إغلاق</button>
+                  </div>
+                </div>
+              </div>`;
+            }
+
             // Section / Sub / Item modals (admin only)
             const titles = {
                 section: 'تعديل القسم',
@@ -2091,6 +2262,42 @@
                   <div class="file-pick">
                     <label class="upl">اختر ملف<input type="file" id="modal-file"></label>
                     <span class="fname">${hasFile ? m.fileName || 'تم اختيار ملف' : 'لا يوجد ملف'}</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>الأزرار الظاهرة للأعضاء</label>
+                  <select id="modal-button-mode" onchange="state.modal.buttonMode=this.value">
+                    <option value="both" ${(!m.buttonMode||m.buttonMode==='both')?'selected':''}>تحميل + عرض</option>
+                    <option value="download" ${m.buttonMode==='download'?'selected':''}>تحميل فقط</option>
+                    <option value="preview" ${m.buttonMode==='preview'?'selected':''}>عرض فقط</option>
+                  </select>
+                </div>
+                <div class="field dlonly-panel">
+                  <label class="announce-toggle-row">
+                    <input type="checkbox" id="dlonly-enable" ${m.previewOverride==='download_only'?'checked':''} onchange="state.modal.previewOverride=this.checked?'download_only':'auto'; document.getElementById('dlonly-fields').style.display=this.checked?'block':'none'">
+                    <span><i class="fas fa-sliders"></i> التحكم اليدوي في download-only.html</span>
+                  </label>
+                  <div id="dlonly-fields" style="display:${m.previewOverride==='download_only'?'block':'none'}">
+                    <label style="display:block;font-size:.76rem;font-weight:700;margin-top:8px">اسم الملف (يظهر داخل صفحة download-only.html)</label>
+                    <input type="text" id="dlonly-name" value="${escapeHtml(m.dlonlyDisplayName||'')}" placeholder="مثال: محاضرة_1.pdf" oninput="state.modal.dlonlyDisplayName=this.value">
+                    <label style="display:block;font-size:.76rem;font-weight:700;margin-top:10px">المصدر</label>
+                    <select id="dlonly-source-type" onchange="state.modal.dlonlySourceType=this.value; render()">
+                      <option value="upload" ${(!m.dlonlySourceType||m.dlonlySourceType==='upload')?'selected':''}>رفع ملف</option>
+                      <option value="link" ${m.dlonlySourceType==='link'?'selected':''}>وضع رابط</option>
+                    </select>
+                    ${(!m.dlonlySourceType||m.dlonlySourceType==='upload') ? `
+                    <div class="file-pick" style="margin-top:8px">
+                      <label class="upl">اختر ملف<input type="file" id="dlonly-file"></label>
+                      <span class="fname">${m.dlonlyFilePath ? (m.dlonlyFileNameHint||'تم اختيار ملف') : 'لا يوجد ملف'}</span>
+                    </div>` : `
+                    <input type="url" id="dlonly-link" value="${escapeHtml(m.dlonlyLink||'')}" placeholder="https://..." style="margin-top:8px" oninput="state.modal.dlonlyLink=this.value">`}
+                    <label style="display:block;font-size:.76rem;font-weight:700;margin-top:10px">يظهر في</label>
+                    <div class="dlonly-row">
+                      <label class="opt"><input type="radio" name="dlonly-target" value="download" ${m.dlonlyTarget==='download'?'checked':''} onchange="state.modal.dlonlyTarget='download'"> التحميل فقط</label>
+                      <label class="opt"><input type="radio" name="dlonly-target" value="preview" ${m.dlonlyTarget==='preview'?'checked':''} onchange="state.modal.dlonlyTarget='preview'"> العرض فقط</label>
+                      <label class="opt"><input type="radio" name="dlonly-target" value="both" ${(!m.dlonlyTarget||m.dlonlyTarget==='both')?'checked':''} onchange="state.modal.dlonlyTarget='both'"> الاثنين</label>
+                    </div>
+                    <small class="access-help">لو مفعّل، ستظهر صفحة download-only.html بالملف/الرابط ده بدل التحميل أو العرض التلقائي (حسب اختيارك فوق) — حتى لو الملف الأصلي بيدعم معاينة حقيقية.</small>
                   </div>
                 </div>
                 <div class="field announce-panel">
@@ -2228,6 +2435,13 @@
                 fileInput.addEventListener('change', onFileChange);
             }
 
+            // File inputs - dlonly manual source
+            const dlonlyFileInput = document.getElementById('dlonly-file');
+            if (dlonlyFileInput) {
+                dlonlyFileInput.removeEventListener('change', onDlonlyFileChange);
+                dlonlyFileInput.addEventListener('change', onDlonlyFileChange);
+            }
+
             const userSearch = document.getElementById('userSearch');
             if(userSearch){
                 userSearch.addEventListener('input', e=>{
@@ -2320,6 +2534,11 @@
         function onFileChange(e) {
             e.stopPropagation(); const f=e.target.files?.[0]; if(!f||!state.modal) return;
             state.modal.fileFile=f; state.modal.fileName=f.name; render();
+        }
+
+        function onDlonlyFileChange(e) {
+            e.stopPropagation(); const f=e.target.files?.[0]; if(!f||!state.modal) return;
+            state.modal.dlonlyFile=f; state.modal.dlonlyFileNameHint=f.name; render();
         }
 
         function onNameInput(e) {
@@ -3517,12 +3736,22 @@
                 }
 
                 case 'download-file': {
-                    const fileData = el.dataset.file;
-                    const fileName = el.dataset.name || 'محاضرة';
-                    if (fileData) {
+                    // دعم توافقي قديم: لو فيه data-file مباشر (بدون data-item) نزّل زي ما كان بالضبط
+                    if (el.dataset.file && !el.dataset.item) {
+                        const fileData = el.dataset.file;
+                        const fileName = el.dataset.name || 'محاضرة';
                         window.__midadActiveDownloadButton = el;
                         await downloadMaterial({ filePath: fileData, fileData, fileName });
+                        break;
                     }
+                    const item = findItem(state.currentSectionId, state.currentSubId, el.dataset.item);
+                    if (item) await handleDownloadClick(item);
+                    break;
+                }
+
+                case 'preview-file': {
+                    const item = findItem(state.currentSectionId, state.currentSubId, el.dataset.item);
+                    if (item) await handlePreviewClick(item);
                     break;
                 }
 
@@ -3651,7 +3880,7 @@
                 case 'add-item': {
                     if (isAdmin()) {
                         if(!state.users.length){ try{ const {data,error}=await sb.from('profiles').select('*').order('created_at',{ascending:false}); if(error) throw error; state.users=data||[]; }catch(err){ return showToast('تعذر تحميل قائمة المستخدمين: '+err.message,'error'); } }
-                        openModal('add-item', {visibilityMode:'all',allowedUsers:[],excludedUsers:[],textBold:true,textColor:'#111827'});
+                        openModal('add-item', {visibilityMode:'all',allowedUsers:[],excludedUsers:[],textBold:true,textColor:'#111827',buttonMode:'both',previewOverride:'auto',dlonlySourceType:'upload',dlonlyTarget:'both'});
                     }
                     break;
                 }
@@ -3662,7 +3891,7 @@
                         const item = findItem(state.currentSectionId, state.currentSubId, el.dataset.item);
                         if (item) {
                             if(!state.users.length){ try{ const {data,error}=await sb.from('profiles').select('*').order('created_at',{ascending:false}); if(error) throw error; state.users=data||[]; }catch(err){ return showToast('تعذر تحميل قائمة المستخدمين: '+err.message,'error'); } }
-                            openModal('item', { name: item.name, image: item.image, fileName: item.fileName, fileData: item.fileData, targetId: item.id, visibilityMode:item.visibilityMode||'all', allowedUsers:item.allowedUsers||[], excludedUsers:item.excludedUsers||[], ownerId:item.ownerId||state.user?.id||null, textBold:item.textBold!==false, textColor:item.textColor||'#111827' });
+                            openModal('item', { name: item.name, image: item.image, fileName: item.fileName, fileData: item.fileData, targetId: item.id, visibilityMode:item.visibilityMode||'all', allowedUsers:item.allowedUsers||[], excludedUsers:item.excludedUsers||[], ownerId:item.ownerId||state.user?.id||null, textBold:item.textBold!==false, textColor:item.textColor||'#111827', buttonMode:item.buttonMode||'both', previewOverride:item.previewOverride||'auto', dlonlySourceType:item.dlonlySourceType||'upload', dlonlyFilePath:item.dlonlyFilePath||null, dlonlyLink:item.dlonlyLink||'', dlonlyDisplayName:item.dlonlyDisplayName||'', dlonlyTarget:item.dlonlyTarget||'both' });
                         }
                     }
                     break;
@@ -3780,6 +4009,14 @@
                 const imageBucket=(m.kind==='item'||m.kind==='add-item')?'materials':(m.kind==='sub'||m.kind==='add-sub'?'subcategories':'categories');
                 const imagePath=m.imageFile?await uploadFile(imageBucket,m.imageFile,'images'):(m.image&&!String(m.image).startsWith('blob:')?m.image:null);
                 const filePath=m.fileFile?await uploadFile('materials',m.fileFile,'files'):(m.fileData&&!String(m.fileData).startsWith('data:')?m.fileData:null);
+                const dlonlyFilePath = (m.kind==='item'||m.kind==='add-item') ? (m.dlonlyFile?await uploadFile('materials',m.dlonlyFile,'dlonly'):(m.dlonlyFilePath||null)) : null;
+                const buttonMode = m.buttonMode || 'both';
+                const previewOverride = m.previewOverride === 'download_only' ? 'download_only' : 'auto';
+                const dlonlySourceType = previewOverride==='download_only' ? (m.dlonlySourceType||'upload') : null;
+                const dlonlyLinkVal = previewOverride==='download_only' && dlonlySourceType==='link' ? (m.dlonlyLink||null) : null;
+                const dlonlyFilePathVal = previewOverride==='download_only' && dlonlySourceType==='upload' ? (dlonlyFilePath||null) : null;
+                const dlonlyDisplayNameVal = previewOverride==='download_only' ? (m.dlonlyDisplayName||null) : null;
+                const dlonlyTargetVal = previewOverride==='download_only' ? (m.dlonlyTarget||'both') : null;
                 m.visibilityMode=document.getElementById('content-visibility')?.value||m.visibilityMode||'all'; m.textBold = m.textBold !== false; m.textColor = m.textColor || '#111827'; m.allowedUsers=[...(document.getElementById('content-allow-users')?.selectedOptions||[])].map(o=>o.value); m.excludedUsers=[...(document.getElementById('content-deny-users')?.selectedOptions||[])].map(o=>o.value);
                 const announceEnabled = (m.kind==='item'||m.kind==='add-item') && !!document.getElementById('announce-on-publish')?.checked;
                 const announceAudienceMode = document.getElementById('announce-audience-mode')?.value||'all';
@@ -3802,8 +4039,8 @@
                     const sub=findSub(state.currentSectionId,m.targetId);if(!sub)throw new Error('القسم الفرعي غير موجود');const patch={name:m.name,visibility_mode:m.visibilityMode||'all',owner_id:ownerId,text_bold:m.textBold,text_color:m.textColor};if(imagePath)patch.image_path=imagePath;const {error}=await sb.from('subcategories').update(patch).eq('id',sub.dbId);if(error)throw error;
                     await sb.from('subcategory_user_access').delete().eq('subcategory_id',sub.dbId); const rows=[...(m.allowedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({subcategory_id:sub.dbId,user_id,access_type:'allow'})),...(m.excludedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({subcategory_id:sub.dbId,user_id,access_type:'deny'}))]; if(rows.length){const {error:e}=await sb.from('subcategory_user_access').insert(rows);if(e)throw e;}
                 }
-                else if(m.kind==='add-item'){const sub=findSub(state.currentSectionId,state.currentSubId);if(!sub)throw new Error('اختر قسمًا فرعيًا أولًا');if(sub.items.length>=30)throw new Error('وصلت للحد الأقصى (30 مستطيل)');const {data:newItem,error}=await sb.from('materials').insert({title:m.name||null,image_path:imagePath||null,file_path:filePath||null,subcategory_id:sub.dbId,sort_order:sub.items.length,is_active:true,visibility_mode:m.visibilityMode||'all',owner_id:ownerId,text_bold:m.textBold,text_color:m.textColor}).select('id').single();if(error)throw error; const accessRows=[...(m.allowedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({material_id:newItem.id,user_id,access_type:'allow'})), ...(m.excludedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({material_id:newItem.id,user_id,access_type:'deny'}))]; if(accessRows.length){const {error:ae}=await sb.from('material_user_access').insert(accessRows);if(ae)throw ae;}}
-                else if(m.kind==='item'){const item=findItem(state.currentSectionId,state.currentSubId,m.targetId);if(!item)throw new Error('المستطيل غير موجود');const patch={title:m.name,visibility_mode:m.visibilityMode||'all',owner_id:ownerId,text_bold:m.textBold,text_color:m.textColor};if(imagePath)patch.image_path=imagePath;if(filePath)patch.file_path=filePath;const {error}=await sb.from('materials').update(patch).eq('id',item.dbId);if(error)throw error;
+                else if(m.kind==='add-item'){const sub=findSub(state.currentSectionId,state.currentSubId);if(!sub)throw new Error('اختر قسمًا فرعيًا أولًا');if(sub.items.length>=30)throw new Error('وصلت للحد الأقصى (30 مستطيل)');const {data:newItem,error}=await sb.from('materials').insert({title:m.name||null,image_path:imagePath||null,file_path:filePath||null,subcategory_id:sub.dbId,sort_order:sub.items.length,is_active:true,visibility_mode:m.visibilityMode||'all',owner_id:ownerId,text_bold:m.textBold,text_color:m.textColor,button_mode:buttonMode,preview_override:previewOverride,dlonly_source_type:dlonlySourceType,dlonly_file_path:dlonlyFilePathVal,dlonly_link:dlonlyLinkVal,dlonly_display_name:dlonlyDisplayNameVal,dlonly_target:dlonlyTargetVal}).select('id').single();if(error)throw error; const accessRows=[...(m.allowedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({material_id:newItem.id,user_id,access_type:'allow'})), ...(m.excludedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({material_id:newItem.id,user_id,access_type:'deny'}))]; if(accessRows.length){const {error:ae}=await sb.from('material_user_access').insert(accessRows);if(ae)throw ae;}}
+                else if(m.kind==='item'){const item=findItem(state.currentSectionId,state.currentSubId,m.targetId);if(!item)throw new Error('المستطيل غير موجود');const patch={title:m.name,visibility_mode:m.visibilityMode||'all',owner_id:ownerId,text_bold:m.textBold,text_color:m.textColor,button_mode:buttonMode,preview_override:previewOverride,dlonly_source_type:dlonlySourceType,dlonly_file_path:dlonlyFilePathVal,dlonly_link:dlonlyLinkVal,dlonly_display_name:dlonlyDisplayNameVal,dlonly_target:dlonlyTargetVal};if(imagePath)patch.image_path=imagePath;if(filePath)patch.file_path=filePath;const {error}=await sb.from('materials').update(patch).eq('id',item.dbId);if(error)throw error;
                     await sb.from('material_user_access').delete().eq('material_id',item.dbId);
                     const accessRows=[...(m.allowedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({material_id:item.dbId,user_id,access_type:'allow'})), ...(m.excludedUsers||[]).filter(id=>id!==ownerId).map(user_id=>({material_id:item.dbId,user_id,access_type:'deny'}))];
                     if(accessRows.length){ const {error:ae}=await sb.from('material_user_access').insert(accessRows); if(ae)throw ae; }}
