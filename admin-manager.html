@@ -318,7 +318,7 @@ const SUPABASE_KEY = "sb_publishable_LEFYVl0Y8VOnMIbBZev1Vg_0pYSMWpv";
 const sb = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
 let users=[], currentUserId=null, titleSelection=[], pendingAvatarFile=null;
-let dragonAdminSettings={enabled:true,target_type:'all',default_device_mode:'both',members_default_user_enabled:true,admin_enabled:true,admin_device_mode:'both',admin_control_enabled:false,admin_user_enabled:true,members_control_available:false};
+let dragonAdminSettings={enabled:true,target_type:'all',default_device_mode:'both',members_default_user_enabled:false,admin_enabled:true,admin_device_mode:'both',admin_control_enabled:false,admin_user_enabled:true,members_control_available:true};
 let dragonUserSettingsCache={};
 let dragonDragonUserRows=[];
 
@@ -452,20 +452,25 @@ async function saveDragonAdminSettings(){
    p_admin_user_enabled:$('dragonAdminStart').value==='true'
   };
   const {error}=await sb.rpc('dragon_admin_set_settings',payload); if(error)throw error;
-  const checks=[...document.querySelectorAll('.dragon-member-check')];
-  if(checks.length){
-   await Promise.all(checks.map(async ch=>{
-    const id=String(ch.dataset.userId||''); if(!id)return;
-    const old=dragonUserSettingsCache[id]||{};
-    const {error:e}=await sb.rpc('dragon_admin_set_user',{
-      p_user_id:id,
-      p_allowed:ch.checked,
-      p_control_enabled:old.control_enabled===true,
-      p_user_enabled:old.user_enabled!==false,
-      p_device_mode:old.device_mode||payload.p_default_device_mode
-    });
+  // الإعدادات العامة هي الافتراضي الحقيقي لكل الأعضاء. لا ننشئ override لكل عضو عند اختيار (كل الأعضاء).
+  if(payload.p_target_type==='all'){
+    const {error:e}=await sb.rpc('dragon_admin_clear_user_overrides');
     if(e)throw e;
-   }));
+  }else{
+    const checks=[...document.querySelectorAll('.dragon-member-check')];
+    const {error:ce}=await sb.rpc('dragon_admin_clear_user_overrides');
+    if(ce)throw ce;
+    await Promise.all(checks.filter(ch=>ch.checked).map(async ch=>{
+      const id=String(ch.dataset.userId||''); if(!id)return;
+      const {error:e}=await sb.rpc('dragon_admin_set_user',{
+        p_user_id:id,
+        p_allowed:true,
+        p_control_enabled:payload.p_members_control_available,
+        p_user_enabled:payload.p_members_default_user_enabled,
+        p_device_mode:payload.p_default_device_mode
+      });
+      if(e)throw e;
+    }));
   }
   dragonAdminSettings={enabled:payload.p_enabled,target_type:payload.p_target_type,default_device_mode:payload.p_default_device_mode,members_default_user_enabled:payload.p_members_default_user_enabled,admin_enabled:payload.p_admin_enabled,admin_device_mode:payload.p_admin_device_mode,members_control_available:payload.p_members_control_available,admin_control_enabled:payload.p_admin_control_enabled,admin_user_enabled:payload.p_admin_user_enabled};
   await loadDragonUserRows();
@@ -753,6 +758,8 @@ async function createInstantAccount(){
 async function openEdit(id){
  const u=users.find(x=>String(x.id)===String(id));if(!u)return;titleSelection=titleList(u.profile_title);pendingAvatarFile=null;
  await loadDragonUserSettings(id); const ds=dragonUserSettingsCache[id]||{};
+ const tp=await sb.from('user_theme_preferences').select('themes_button_enabled').eq('user_id',id).maybeSingle();
+ const themeButtonDefault=tp.data?.themes_button_enabled!==false; ds.theme_button_enabled=themeButtonDefault;
  $('modalRoot').innerHTML=`<div class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal">
  <div class="modal-head"><h2>${ic('edit')}تعديل المستخدم</h2><button class="close" onclick="closeModal()">×</button></div>
  <div class="avatar-edit"><img id="avatarPreview" class="avatar-preview" src="${esc(avatarUrl(u))}" onerror="this.removeAttribute('src')"><div><b>${esc(nameOf(u))}</b><div class="small">اختار صورة جديدة من جهازك أو اترك الصورة الحالية كما هي.</div><label class="file-label">${ic('image')}اختيار صورة<input id="avatarFile" type="file" accept="image/*" onchange="previewAvatar(this)"></label></div></div>
@@ -768,7 +775,7 @@ async function openEdit(id){
  <div class="field"><label>زر إتاحة التنين للعضو</label><select id="dragonControl"><option value="true" ${ds.control_enabled===true?'selected':''}>ظاهر للعضو</option><option value="false" ${ds.control_enabled!==true?'selected':''}>مخفي عن العضو</option></select><div class="small">الزر يسمح للعضو بإخفاء/إظهار التنين لنفسه فقط.</div></div>
  <div class="field"><label>حالة التنين لهذا العضو عند الدخول</label><select id="dragonStartEnabled"><option value="true" ${ds.user_enabled!==false?'selected':''}>يظهر تلقائيًا عند الدخول</option><option value="false" ${ds.user_enabled===false?'selected':''}>يحتاج تفعيله من الملف الشخصي</option></select><div class="small">لو اخترت التفعيل من الملف الشخصي، يبدأ التنين مخفيًا حتى يفعّله العضو.</div></div>
  <div class="field"><label>جهاز ظهور التنين لهذا العضو</label><select id="dragonUserDevice"><option value="both" ${(ds.device_mode||'both')==='both'?'selected':''}>الموبايل والكمبيوتر</option><option value="mobile" ${(ds.device_mode||'both')==='mobile'?'selected':''}>الموبايل فقط</option><option value="desktop" ${(ds.device_mode||'both')==='desktop'?'selected':''}>الكمبيوتر فقط</option></select></div>
- <div class="field"><label>${ic('palette')}زر السمات</label><select id="editThemeButton"><option value="true">متاح للمستخدم</option><option value="false">غير متاح للمستخدم</option></select><div class="small">لو متاح، يظهر زر السمات للمستخدم.</div></div>
+ <div class="field"><label>${ic('palette')}زر السمات</label><select id="editThemeButton"><option value="true" ${ds.theme_button_enabled!==false?'selected':''}>متاح للمستخدم</option><option value="false" ${ds.theme_button_enabled===false?'selected':''}>غير متاح للمستخدم</option></select><div class="small">لو متاح، يظهر زر السمات للمستخدم.</div></div>
  <div class="actions"><button onclick="saveEdit('${esc(u.id)}')">${ic('check')}حفظ كل التعديلات</button><button class="btn-gray" onclick="closeModal()">إلغاء</button></div>
  <div id="editStatus" class="status"></div></div></div>`;
 }
@@ -821,7 +828,7 @@ async function openThemes(id){
   const pref=pr.data||{},allowed=(ar.data||[]).map(x=>String(x.theme_id));
   $('modalRoot').innerHTML=`<div class="modal-back"><div class="modal"><div class="modal-head"><h2>${ic('palette')}سمات ${esc(nameOf(u))}</h2><button class="close" onclick="closeModal()">×</button></div>
   <div class="field"><label>السمة الأساسية التي يفتح عليها</label><select id="themeMain"><option value="">السمة الافتراضية</option>${themes.map(t=>`<option value="${esc(t.id)}" ${String(pref.theme_id||'')===String(t.id)?'selected':''}>${esc(t.display_name||t.name||THEME_FALLBACK[t.id]||t.id)}</option>`).join('')}</select></div>
-  <div class="field"><label>إتاحة الزر العلوي للسمات</label><select id="themeButton"><option value="false" ${!pref.themes_button_enabled?'selected':''}>لا</option><option value="true" ${pref.themes_button_enabled?'selected':''}>نعم</option></select></div>
+  <div class="field"><label>إتاحة الزر العلوي للسمات</label><select id="themeButton"><option value="false" ${pref.themes_button_enabled===false?'selected':''}>لا</option><option value="true" ${pref.themes_button_enabled!==false?'selected':''}>نعم</option></select></div>
   <div class="field"><label>إتاحة الزر السفلي للسمات</label><select id="themeBottomButton"><option value="false" ${!pref.themes_bottom_button_enabled?'selected':''}>لا</option><option value="true" ${pref.themes_bottom_button_enabled?'selected':''}>نعم</option></select></div>
   <div class="field"><label>تحديد السمات المسموح بها</label><select id="themeRestrict"><option value="false" ${!pref.restricted_theme_selection?'selected':''}>لا — كل السمات</option><option value="true" ${pref.restricted_theme_selection?'selected':''}>نعم — المسموح بها فقط</option></select></div>
   <div class="field"><label>اختار السمات المسموح بها</label><div class="theme-grid">${themes.map(t=>`<label><input type="checkbox" value="${esc(t.id)}" ${allowed.includes(String(t.id))?'checked':''}>${esc(t.display_name||t.name||THEME_FALLBACK[t.id]||t.id)}</label>`).join('')}</div></div>
